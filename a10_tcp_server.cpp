@@ -205,12 +205,12 @@ std::vector<double> A10TcpServer::get_target_q()
 {
     std::lock_guard<std::mutex> lk(q_mutex_);
     return target_q_;
-    std::cout << "get_target_q函数输出:[";
-    for ( int i = 0; i < target_q_.size(); ++i)
-    {   
-        std::cout << target_q_[i] << (i < target_q_.size() - 1 ? ",":"" );
-    }
-    std::cout << "\n";
+    //std::cout << "get_target_q函数输出:[";
+    // for ( int i = 0; i < target_q_.size(); ++i)
+    // {   
+    //     std::cout << target_q_[i] << (i < target_q_.size() - 1 ? ",":"" );
+    // }
+    // std::cout << "\n";
 }
 
 void A10TcpServer::send_leader_state(int client_sock)
@@ -355,14 +355,14 @@ void A10TcpServer::process_line(int client_sock, const std::string &line)
         std::lock_guard<std::mutex> lk(q_mutex_);
         target_q_ = parsed;
 
-        static int printcount = 0;
-        if( printcount++ % 1000 ==0)
-        {   std::cout << "Received target_q:[";
-            for ( int i = 0; i < target_q_.size(); ++i)
-            {
-                std::cout << target_q_[i] << (i < target_q_.size() - 1 ? ",":"" );
-            }
-            std::cout << "]\n";
-        }
+        // static int printcount = 0;
+        // if( printcount++ % 1000 ==0)
+        // {   std::cout << "Received target_q:[";
+        //     for ( int i = 0; i < target_q_.size(); ++i)
+        //     {
+        //         std::cout << target_q_[i] << (i < target_q_.size() - 1 ? ",":"" );
+        //     }
+        //     std::cout << "]\n";
+        // }
     }
 }
