@@ -1,6 +1,9 @@
 #include "robot.hpp"
 #include "gravcomp.hpp"
 #include <array>
+#include "a10_tcp_server.hpp"
+
+extern A10TcpServer *g_tcp_server;
 
 
 using namespace std;
@@ -332,9 +335,24 @@ namespace robot
 
         GravComp gc;
 
+        // static double init_pos[12] =
+        // { 0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 2, 0,
+        // 0, 0, -2 * PI / 3, PI / 6, PI / 2, 0 };
+
+        //让主臂和从一样
         static double init_pos[12] =
         { 0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 2, 0,
-        0, 0, -2 * PI / 3, PI / 6, PI / 2, 0 };
+        0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 2, 0 };
+
+        //6-12维反向
+        // static double init_pos[12] =
+        // { 0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 2, 0,
+        // 0, 0, -5 * PI / 6, 5 * PI / 6, PI / 2, 0 };
+
+        // //1-6维反向
+        // static double init_pos[12] =
+        // { 0, 0, -5 * PI / 6, 5 * PI / 6, PI / 2, 0,
+        // 0, 0, -2 * PI / 3, PI / 6, PI / 2, 0 };
 
         auto getForceData = [&](double* data_, int m_, bool init_)
 		{
@@ -2549,8 +2567,7 @@ namespace robot
 
                 //Force Filter
                 forceFilter(actual_force,filtered_force);
-
-                //Coordinate Transform Arm1
+                // //Coordinate Transform Arm1
                 transform_force[0] = filtered_force[2];
                 transform_force[1] = -filtered_force[1];
                 transform_force[2] = filtered_force[0];
@@ -2668,12 +2685,16 @@ namespace robot
 				eeA2.getV(current_vel);
 				eeA2.getMpm(current_pm);
 
+
+                //都是在末端坐标系下的力
 				getForceData(current_force, 1, imp_->init);
 				gc.getCompFT(current_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force);
 				for (int i = 0; i < 6; i++)
 				{
 					actual_force[i] = comp_force[i] + current_force[i];
 				}
+
+
 
 				//Dead Zone of Force
 				for (int i = 0; i < 6; i++)
@@ -2692,10 +2713,6 @@ namespace robot
 					}
 
 				}
-
-                //Force Filter
-                forceFilter(actual_force, filtered_force);
-
 
                 //Coordinate Transform Arm2
                 transform_force[0] = -filtered_force[2];
@@ -3285,6 +3302,35 @@ namespace robot
 					mout() << "Error" << std::endl;
 				}
                 //saMove(current_pos, model_a1, 0);
+                
+                // //------------ 3. 从臂：通过 TCP 跟随 Leader 的目标关节 ------------
+                
+                if (g_tcp_server)
+                {
+                    std::vector<double> target_q = g_tcp_server->get_target_q();
+
+
+                    // static int printcount = 0;
+                    // if( printcount++ % 100 ==0)
+                    // {   std::cout << "点击控制q向量:[";
+                    //     for ( int i = 0; i < target_q.size(); ++i)
+                    //     {
+                    //         std::cout << target_q[i] << (i < target_q.size() - 1 ? ",":"" );
+                    //     }
+                    //     std::cout << "]\n";
+                    // }
+
+                    // 这里假设 target_q 是从 Leader 端发来的 6 关节角（或者你自己约定的格式）
+                    if (target_q.size() >= 6)
+                    {
+                        for (int i = 0; i < 6; ++i)
+                        {
+                            // 从臂电机索引 6~11
+                            //添加负号，让主从臂对称运动
+                            controller()->motorPool()[i + 6].setTargetPos(target_q[i]);
+                        }
+                    }
+                }
 
 
 				if (count() % 100 == 0)
@@ -3309,6 +3355,21 @@ namespace robot
 				eeA2.getV(current_vel);
 				eeA2.getMpm(current_pm);
 
+                double rm_be[9];  
+                rm_be[0] = current_pm[0];
+                rm_be[1] = current_pm[1];
+                rm_be[2] = current_pm[2];
+
+                rm_be[3] = current_pm[4];
+                rm_be[4] = current_pm[5];
+                rm_be[5] = current_pm[6];
+
+                rm_be[6] = current_pm[8];
+                rm_be[7] = current_pm[9];
+                rm_be[8] = current_pm[10];
+
+
+                //传感器坐标系下的力数据
 				getForceData(current_force, 1, imp_->init);
 				gc.getCompFT(current_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force);
 				for (int i = 0; i < 6; i++)
@@ -3317,36 +3378,51 @@ namespace robot
 				}
 
 
-               if(count()%50==0)
-               {
-                   lout()<<"raw"<<'\t'<<current_force[0]+imp_->arm2_init_force[0]<<'\t'<<current_force[1]+imp_->arm2_init_force[1]<<'\t'<<current_force[2]+imp_->arm2_init_force[2]<<'\t'
-                   <<'\t'<<current_force[3]+imp_->arm2_init_force[3]<<'\t'<<current_force[4]+imp_->arm2_init_force[4]<<'\t'<<current_force[5]+imp_->arm2_init_force[5]<<'\t'
-                           <<"comp"<<'\t'<<actual_force[0]<<'\t'<<actual_force[1]<<'\t'<<actual_force[2]<<'\t'
-                           <<actual_force[3]<<'\t'<<actual_force[4]<<'\t'<<actual_force[5]<<std::endl;
-               }
+            //    if(count()%50==0)
+            //    {
+            //        lout()<<"raw"<<'\t'<<current_force[0]+imp_->arm2_init_force[0]<<'\t'<<current_force[1]+imp_->arm2_init_force[1]<<'\t'<<current_force[2]+imp_->arm2_init_force[2]<<'\t'
+            //        <<'\t'<<current_force[3]+imp_->arm2_init_force[3]<<'\t'<<current_force[4]+imp_->arm2_init_force[4]<<'\t'<<current_force[5]+imp_->arm2_init_force[5]<<'\t'
+            //                <<"comp"<<'\t'<<actual_force[0]<<'\t'<<actual_force[1]<<'\t'<<actual_force[2]<<'\t'
+            //                <<actual_force[3]<<'\t'<<actual_force[4]<<'\t'<<actual_force[5]<<std::endl;
+            //    }
 
                 //Force Filter
                 forceFilter(actual_force,filtered_force);
 
+                double F_e[3] = { filtered_force[0], filtered_force[1], filtered_force[2] }
+                ;double F_b[3]{0};
+                for (int i = 0; i < 3; ++i)
+                {    F_b[i] = 0.0;    
+                for (int j = 0; j < 3; ++j)    
+                    {       
+                         F_b[i] += rm_be[3 * i + j] * F_e[j];   
+                     }
+                     }
+
+                transform_force[0] = F_b[0];
+                transform_force[1] = F_b[1];
+                transform_force[2] = F_b[2];
+
+                
                 //Coordinate Transform Arm2
-                transform_force[0] = -filtered_force[0];
-                transform_force[1] = filtered_force[1];
-                transform_force[2] = -filtered_force[2];
+                // transform_force[0] = -filtered_force[0];
+                // transform_force[1] = filtered_force[1];
+                // transform_force[2] = -filtered_force[2];
 
                 transform_force[3] = -filtered_force[3];
                 transform_force[4] = filtered_force[4];
                 transform_force[5] = -filtered_force[5];
 
-                if (count() % 50 == 0)
-                {
-                    // mout() << current_vel[0] << '\t' << current_vel[1] << '\t' << current_vel[2] << '\t'
-                    // 	<< current_vel[3] << '\t' << current_vel[4] << '\t' << current_vel[5] << std::endl;
+                // if (count() % 50 == 0)
+                // {
+                //     // mout() << current_vel[0] << '\t' << current_vel[1] << '\t' << current_vel[2] << '\t'
+                //     // 	<< current_vel[3] << '\t' << current_vel[4] << '\t' << current_vel[5] << std::endl;
 
-                    mout() <<"Pos: "<<'\t'<< current_pos[0] << '\t' << current_pos[1] << '\t' << current_pos[2] <<'\t'
-                          <<"Force: "<< transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] <<'\t'
-                         << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] <<'\t'<< std::endl;
+                //     mout() <<"Pos: "<<'\t'<< current_pos[0] << '\t' << current_pos[1] << '\t' << current_pos[2] <<'\t'
+                //           <<"Force: "<< transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] <<'\t'
+                //          << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] <<'\t'<< std::endl;
 
-                }
+                // }
 
 
                 //Dead Zone of Force
@@ -3439,6 +3515,34 @@ namespace robot
 				}
 				saMove(current_pos, model_a2, 1);
 
+                // //------------ 3. 从臂：通过 TCP 跟随 Leader 的目标关节 ------------
+                
+                if (g_tcp_server)
+                {
+                    std::vector<double> target_q = g_tcp_server->get_target_q();
+
+
+                    // static int printcount = 0;
+                    // if( printcount++ % 100 ==0)
+                    // {   std::cout << "点击控制q向量:[";
+                    //     for ( int i = 0; i < target_q.size(); ++i)
+                    //     {
+                    //         std::cout << target_q[i] << (i < target_q.size() - 1 ? ",":"" );
+                    //     }
+                    //     std::cout << "]\n";
+                    // }
+
+                    // 这里假设 target_q 是从 Leader 端发来的 6 关节角（或者你自己约定的格式）
+                    if (target_q.size() >= 6)
+                    {
+                        for (int i = 0; i < 6; ++i)
+                        {
+                            // 从臂电机索引 6~11
+                            //添加负号，让主从臂对称运动
+                            controller()->motorPool()[i].setTargetPos(target_q[i]);
+                        }
+                    }
+                }
 
 
 
@@ -3463,7 +3567,7 @@ namespace robot
 
 		}
 
-        return 50000 - count();
+        return 20000 - count();
 	}
 	ForceDrag::ForceDrag(const std::string& name)
 	{
