@@ -13,6 +13,7 @@
 #include "kaanhbot/system/about.hpp"
 #include "kaanhbot/utility/tool_api.hpp"
 #include "plan.hpp"
+#include "a10_tcp_server.hpp"
 
 #include "robot.hpp"
 #include "assemcomd.hpp"
@@ -20,6 +21,8 @@
 
 #define __S(x) #x
 #define _S(x) __S(x)
+
+A10TcpServer* g_tcp_server = nullptr;
 
 auto xmlpath = std::filesystem::absolute(".");	//获取当前工程所在的路径
 auto logpath = std::filesystem::absolute(".");
@@ -30,7 +33,7 @@ int main(int argc, char *argv[]){
 	xmlpath = xmlpath / xmlfile;
 	logpath = logpath / logfolder;
 
-	auto&cs = aris::server::ControlServer::instance();
+	auto& cs = aris::server::ControlServer::instance();
 	auto port = argc < 2 ? 5866 : std::stoi(argv[1]);
 	auto path = argc < 2 ? xmlpath : argv[2];
 	auto logp = argc < 2 ? logpath : argv[3];
@@ -58,8 +61,32 @@ int main(int argc, char *argv[]){
 
 	aris::core::fromXmlFile(cs, path);
 
-    cs.init();
+    static A10TcpServer tcp_server;
+    if(tcp_server.start(8080)){ 
+        std::cout <<"TCP Server started at port 8080" << std::endl;
+        g_tcp_server = &tcp_server;
+    } else {
+        std::cerr <<"Faild to start tcp server " << std::endl;
+    }
 
+    std::thread state_update_thread([&](){
+        while (true)
+        {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        std::vector<double> current_q(12);
+
+        for (int i = 0; i < 12; ++i){
+            current_q[i] = cs.controller().motorPool()[i].actualPos();
+        } 
+        
+        tcp_server.send_set_joints(current_q);
+        }
+    });
+    // state_update_thread,detach();
+
+
+    cs.init();
 
     // 修改末端杆件位姿,需要重写xml
    {

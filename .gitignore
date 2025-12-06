@@ -381,3 +381,7 @@ hd_data_collect/
 10mm_hole_test/
 
 12mm_hole_test/
+
+build_clean/
+
+*.txt

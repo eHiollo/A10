@@ -52,12 +52,17 @@ message("${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 
 
 # build kaanh executable
-add_executable(kaanhbin ${PROJECT_SOURCE_DIR}/main.cpp ${PROJECT_SOURCE_DIR}/robot.cpp ${PROJECT_SOURCE_DIR}/robot.hpp ${PROJECT_SOURCE_DIR}/gravcomp.cpp ${PROJECT_SOURCE_DIR}/gravcomp.hpp 
-${PROJECT_SOURCE_DIR}/curve.cpp ${PROJECT_SOURCE_DIR}/curve.hpp ${PROJECT_SOURCE_DIR}/assemcomd.cpp ${PROJECT_SOURCE_DIR}/assemcomd.hpp 
-${PROJECT_SOURCE_DIR}/datacomd.cpp ${PROJECT_SOURCE_DIR}/datacomd.hpp ${PROJECT_SOURCE_DIR}/rivetcomd.cpp ${PROJECT_SOURCE_DIR}/rivetcomd.hpp 
+add_executable(kaanhbin ${PROJECT_SOURCE_DIR}/main.cpp ${PROJECT_SOURCE_DIR}/robot.cpp 
+${PROJECT_SOURCE_DIR}/robot.hpp ${PROJECT_SOURCE_DIR}/gravcomp.cpp ${PROJECT_SOURCE_DIR}/gravcomp.hpp 
+${PROJECT_SOURCE_DIR}/curve.cpp ${PROJECT_SOURCE_DIR}/curve.hpp ${PROJECT_SOURCE_DIR}/assemcomd.cpp 
+${PROJECT_SOURCE_DIR}/assemcomd.hpp 
+${PROJECT_SOURCE_DIR}/datacomd.cpp ${PROJECT_SOURCE_DIR}/datacomd.hpp ${PROJECT_SOURCE_DIR}/rivetcomd.cpp 
+${PROJECT_SOURCE_DIR}/rivetcomd.hpp 
 ${PROJECT_SOURCE_DIR}/searchDir.cpp ${PROJECT_SOURCE_DIR}/searchDir.hpp
 ${PROJECT_SOURCE_DIR}/test.cpp ${PROJECT_SOURCE_DIR}/test.hpp
 ${PROJECT_SOURCE_DIR}/movel.cpp ${PROJECT_SOURCE_DIR}/movel.hpp
+${PROJECT_SOURCE_DIR}/a10_tcp_server.cpp ${PROJECT_SOURCE_DIR}/a10_tcp_server.hpp
+${PROJECT_SOURCE_DIR}/master_slave.cpp ${PROJECT_SOURCE_DIR}/master_slave.hpp
 )
 
 target_include_directories(kaanhbin PUBLIC ${PROJECT_BINARY_DIR})

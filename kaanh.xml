@@ -2085,6 +2085,10 @@
                     </GroupParam>
                 </Command>
             </PlateAllignTest>
+            <MasterSlave name="plan">
+                <Command __prop_name__="command" name="master_slave">
+                </Command>
+            </MasterSlave>
             <RivetInit name="plan">
                 <Command __prop_name__="command" name="r_init"/>
             </RivetInit>
