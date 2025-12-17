@@ -60,7 +60,8 @@ int main(int argc, char *argv[]){
 	});
 
 	aris::core::fromXmlFile(cs, path);
-
+    
+    //建立TCP服务，与lerobot通信
     static A10TcpServer tcp_server;
     if(tcp_server.start(8080)){ 
         std::cout <<"TCP Server started at port 8080" << std::endl;
@@ -68,7 +69,8 @@ int main(int argc, char *argv[]){
     } else {
         std::cerr <<"Faild to start tcp server " << std::endl;
     }
-
+    
+    //新开一个进程，持续更新机器人信息
     std::thread state_update_thread([&](){
         while (true)
         {
@@ -79,7 +81,8 @@ int main(int argc, char *argv[]){
         for (int i = 0; i < 12; ++i){
             current_q[i] = cs.controller().motorPool()[i].actualPos();
         } 
-        
+        //获取舵机数据并存在从臂下一维，也就是current_q[6]
+
         tcp_server.send_set_joints(current_q);
         }
     });

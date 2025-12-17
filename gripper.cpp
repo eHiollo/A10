@@ -1,40 +1,42 @@
 #include "gripper.hpp"
 
-#include <cstring>
-#include <cerrno>
-#include <cstdio>
-#include <cmath>
-#include <stdexcept>
-#include <iostream>
-#include <iomanip>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
-
-// Linux headers
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <fcntl.h>
-#include <unistd.h>
-#include <sys/select.h>
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
 #include <sys/ioctl.h>
-#include <asm/termbits.h>   // termios2
-#include <linux/serial.h>
+#include <sys/select.h>
+#include <termios.h>
+#include <unistd.h>
 
-static inline void die_perror(const char* msg) {
-  ::perror(msg);
-}
+// -------------------- Protocol constants --------------------
+static constexpr uint8_t ID_BROADCAST    = 0xFE;
+static constexpr uint8_t INST_PING       = 0x01;
+static constexpr uint8_t INST_READ_DATA  = 0x02;
+static constexpr uint8_t INST_WRITE_DATA = 0x03;
+static constexpr uint8_t INST_REG_WRITE  = 0x04;
+static constexpr uint8_t INST_ACTION     = 0x05;
+static constexpr uint8_t INST_SYNC_WRITE = 0x83;
 
-void sleep_ms(int ms) {
-  usleep(ms * 1000);
-}
+static inline void sleep_ms(int ms) { usleep(ms * 1000); }
 
-void push_u16_le(std::vector<uint8_t>& v, uint16_t x) {
+static inline void push_u16_le(std::vector<uint8_t>& v, uint16_t x) {
   v.push_back(static_cast<uint8_t>(x & 0xFF));
   v.push_back(static_cast<uint8_t>((x >> 8) & 0xFF));
 }
 
-int16_t read_i16_le(const uint8_t* p) {
+static inline int16_t read_i16_le(const uint8_t* p) {
   uint16_t u = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
   return static_cast<int16_t>(u);
 }
+
+static inline void log_perror(const char* msg) { ::perror(msg); }
 
 // ===================== SerialPort =====================
 SerialPort::SerialPort() = default;
@@ -43,54 +45,65 @@ SerialPort::~SerialPort() { close(); }
 bool SerialPort::open(const std::string& port, int baudrate, int timeout_ms) {
   timeout_ms_ = timeout_ms;
 
-  fd_ = ::open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+  fd_ = ::open(port.c_str(), O_RDWR | O_NOCTTY);
   if (fd_ < 0) {
-    die_perror("open serial");
+    log_perror("open serial");
     return false;
   }
 
-  // configure raw mode + baudrate using termios2
-  if (!set_baudrate_linux_(baudrate)) {
-    std::cerr << "Warning: failed to set baudrate to " << baudrate << "\n";
+  if (!set_baudrate_termios_(baudrate)) {
+    std::cerr << "Warning: failed to set baudrate=" << baudrate << "\n";
   }
-
-  // switch to blocking reads (we still use select, but blocking is fine)
-  int flags = fcntl(fd_, F_GETFL, 0);
-  if (flags >= 0) fcntl(fd_, F_SETFL, flags & ~O_NONBLOCK);
 
   tcflush(fd_, TCIFLUSH);
   is_open_ = true;
   return true;
 }
 
-bool SerialPort::set_baudrate_linux_(int baudrate) {
-  termios2 tio{};
-  if (ioctl(fd_, TCGETS2, &tio) != 0) {
-    die_perror("ioctl TCGETS2");
+bool SerialPort::set_baudrate_termios_(int baudrate) {
+  termios tio{};
+  if (tcgetattr(fd_, &tio) != 0) {
+    log_perror("tcgetattr");
     return false;
   }
 
-  // raw-ish
-  tio.c_iflag = 0;
-  tio.c_oflag = 0;
-  tio.c_lflag = 0;
+  cfmakeraw(&tio);
 
-  tio.c_cflag &= ~(PARENB | CSTOPB | CSIZE | CRTSCTS);
-  tio.c_cflag |= (CLOCAL | CREAD | CS8);
+  // 8N1
+  tio.c_cflag &= ~PARENB;
+  tio.c_cflag &= ~CSTOPB;
+  tio.c_cflag &= ~CSIZE;
+  tio.c_cflag |= CS8;
+  tio.c_cflag |= (CLOCAL | CREAD);
 
-  // non-canonical timeout handled by select; still set VMIN/VTIME to 0
-  tio.c_cc[VMIN] = 0;
+  // non-canonical read
+  tio.c_cc[VMIN]  = 0;
   tio.c_cc[VTIME] = 0;
 
-  tio.c_cflag &= ~CBAUD;
-  tio.c_cflag |= BOTHER;
-  tio.c_ispeed = baudrate;
-  tio.c_ospeed = baudrate;
+  speed_t sp;
+  switch (baudrate) {
+    case 9600: sp = B9600; break;
+    case 57600: sp = B57600; break;
+    case 115200: sp = B115200; break;
+#ifdef B1000000
+    case 1000000: sp = B1000000; break;
+#endif
+    default:
+      std::cerr << "Unsupported baudrate in termios: " << baudrate
+                << " (try 115200 or 1000000)\n";
+      return false;
+  }
 
-  if (ioctl(fd_, TCSETS2, &tio) != 0) {
-    die_perror("ioctl TCSETS2");
+  if (cfsetispeed(&tio, sp) != 0 || cfsetospeed(&tio, sp) != 0) {
+    log_perror("cfsetispeed/cfsetospeed");
     return false;
   }
+
+  if (tcsetattr(fd_, TCSANOW, &tio) != 0) {
+    log_perror("tcsetattr");
+    return false;
+  }
+
   return true;
 }
 
@@ -115,14 +128,9 @@ bool SerialPort::writeAll(const std::vector<uint8_t>& data) {
   size_t total = 0;
   while (total < data.size()) {
     ssize_t n = ::write(fd_, data.data() + total, data.size() - total);
-    if (n > 0) {
-      total += static_cast<size_t>(n);
-    } else if (n < 0 && (errno == EINTR)) {
-      continue;
-    } else {
-      // EAGAIN or others: small sleep then retry
-      sleep_ms(1);
-    }
+    if (n > 0) total += (size_t)n;
+    else if (n < 0 && errno == EINTR) continue;
+    else sleep_ms(1);
   }
   return true;
 }
@@ -138,7 +146,7 @@ std::optional<std::vector<uint8_t>> SerialPort::readExact(size_t n, int timeout_
 
   while (got < n) {
     int elapsed = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start).count();
+        std::chrono::steady_clock::now() - start).count();
     int remain_ms = tmo - elapsed;
     if (remain_ms <= 0) return std::nullopt;
 
@@ -156,13 +164,12 @@ std::optional<std::vector<uint8_t>> SerialPort::readExact(size_t n, int timeout_
     ssize_t rd = ::read(fd_, out.data() + got, n - got);
     if (rd > 0) got += (size_t)rd;
   }
-
   return out;
 }
 
 // ===================== BusServo =====================
 BusServo::BusServo(const std::string& port, int baudrate, int timeout_ms, bool verbose)
-  : verbose_(verbose) {
+    : verbose_(verbose) {
   if (!serial_.open(port, baudrate, timeout_ms)) {
     throw std::runtime_error("Failed to open serial port: " + port);
   }
@@ -182,13 +189,15 @@ void BusServo::log_hex_(const std::string& dir, const std::vector<uint8_t>& data
   std::cout << std::dec << "\n";
 }
 
-uint8_t BusServo::calc_checksum_(uint8_t id, uint8_t length, uint8_t instruction, const std::vector<uint8_t>& params) {
+uint8_t BusServo::calc_checksum_(uint8_t id, uint8_t length, uint8_t instruction,
+                                 const std::vector<uint8_t>& params) {
   uint32_t total = id + length + instruction;
   for (auto p : params) total += p;
   return (uint8_t)((~total) & 0xFF);
 }
 
-std::vector<uint8_t> BusServo::send_packet_(uint8_t id, uint8_t instruction, const std::vector<uint8_t>& params) {
+std::vector<uint8_t> BusServo::send_packet_(uint8_t id, uint8_t instruction,
+                                            const std::vector<uint8_t>& params) {
   uint8_t length = (uint8_t)(params.size() + 2);
   uint8_t checksum = calc_checksum_(id, length, instruction, params);
 
@@ -203,7 +212,6 @@ std::vector<uint8_t> BusServo::send_packet_(uint8_t id, uint8_t instruction, con
   pkt.push_back(checksum);
 
   log_hex_("TX", pkt);
-
   serial_.resetInputBuffer();
   serial_.writeAll(pkt);
   return pkt;
@@ -224,25 +232,15 @@ BusServo::Resp BusServo::receive_packet_() {
   }
 
   auto idb = serial_.readExact(1);
-  if (!idb) { log_hex_("RX", raw); r.msg = "Timeout (No ID)"; return r; }
-  raw.push_back((*idb)[0]);
+  if (!idb) { r.msg = "Timeout (No ID)"; return r; }
   uint8_t resp_id = (*idb)[0];
 
   auto lenb = serial_.readExact(1);
-  if (!lenb) { log_hex_("RX", raw); r.msg = "Timeout (No Length)"; return r; }
-  raw.push_back((*lenb)[0]);
+  if (!lenb) { r.msg = "Timeout (No Length)"; return r; }
   uint8_t length = (*lenb)[0];
 
   auto remain = serial_.readExact(length);
-  if (!remain) { log_hex_("RX", raw); r.msg = "Timeout/Incompleted Packet"; return r; }
-  raw.insert(raw.end(), remain->begin(), remain->end());
-
-  log_hex_("RX", raw);
-
-  if (remain->size() != length) {
-    r.msg = "Packet Incomplete";
-    return r;
-  }
+  if (!remain) { r.msg = "Timeout/Incompleted Packet"; return r; }
 
   uint8_t error = (*remain)[0];
   uint8_t recv_checksum = (*remain)[length - 1];
@@ -335,34 +333,8 @@ void BusServo::move_servo(uint8_t servo_id, uint16_t position, uint16_t speed) {
   push_u16_le(item, pwm);
   push_u16_le(item, speed);
 
+  // 0x2A: 你原代码用的地址
   sync_write(0x2A, 6, {item});
-}
-
-void BusServo::set_servo_id(uint8_t old_id, uint8_t new_id) {
-  write_data(old_id, 0x05, {new_id});
-}
-
-void BusServo::set_baudrate(uint8_t servo_id, int baudrate) {
-  int x = (int)(2000000 / baudrate) - 1;
-  x = std::clamp(x, 0, 255);
-  write_data(servo_id, 0x06, {(uint8_t)x});
-}
-
-void BusServo::set_middle_position(uint8_t servo_id) {
-  std::vector<uint8_t> v;
-  push_u16_le(v, 128);
-  write_data(servo_id, 0x28, v);
-}
-
-void BusServo::set_servo_torque_enable(uint8_t servo_id, bool enable) {
-  uint8_t val = enable ? 1 : 0;
-  write_data(servo_id, 0x28, {val});
-}
-
-std::optional<int16_t> BusServo::get_position(uint8_t servo_id) {
-  auto data = read_data(servo_id, 0x38, 2);
-  if (!data) return std::nullopt;
-  return read_i16_le(data->data());
 }
 
 std::optional<BusServo::SensorData> BusServo::read_sensor_data(uint8_t servo_id) {
@@ -425,63 +397,53 @@ void BusServo::set_gripper_position(uint8_t servo_id,
   target = std::clamp(target, 0, 4096);
 
   if (verbose_) {
-    std::cout << "--> Gripper Control: Type=" << gripper_type
-              << ", Target=" << position_mm << "mm"
-              << ", ServoPos=" << target << "\n";
+    std::cout << "--> Gripper: type=" << gripper_type
+              << " target_mm=" << position_mm
+              << " servo_pos=" << target << "\n";
   }
 
   move_servo(servo_id, (uint16_t)target, speed);
 }
 
-// ===================== main =====================
-int main() {
-  try {
-    BusServo servo("/dev/ttyUSB0", 1000000, 150, true);
-
-    std::cout << "\n--- SCAN IDs (PING + SENSOR) ---\n";
-    std::vector<uint8_t> found;
-    for (int id = 1; id <= 253; ++id) {
-      uint8_t err = servo.ping((uint8_t)id);
-      if (err == 0) {
-        std::cout << "Found servo ID: " << id << "\n";
-        found.push_back((uint8_t)id);
-
-        auto s = servo.read_sensor_data((uint8_t)id);
-        if (s) {
-          std::cout << "  Sensor: pos=" << s->position
-                    << ", spd=" << s->speed
-                    << ", load=" << s->load
-                    << ", volt=" << (int)s->voltage
-                    << ", temp=" << (int)s->temperature << "\n";
-        }
-        sleep_ms(10);
-      }
-    }
-
-    uint8_t servo_id = found.empty() ? 10 : found[0];
-
-    std::cout << "\n--- TEST: READ SENSOR DATA ---\n";
-    auto sensor = servo.read_sensor_data(servo_id);
-    if (sensor) {
-      std::cout << "Sensor Data: {"
-                << "id=" << (int)sensor->id
-                << ", position=" << sensor->position
-                << ", speed=" << sensor->speed
-                << ", load=" << sensor->load
-                << ", voltage=" << (int)sensor->voltage
-                << ", temperature=" << (int)sensor->temperature
-                << "}\n";
-    } else {
-      std::cout << "Failed to read sensor data.\n";
-    }
-
-    std::cout << "\n--- TEST: SET GRIPPER POSITION ---\n";
-    servo.set_gripper_position(servo_id, "100mm", 10.0, 1000);
-
-    servo.close();
-  } catch (const std::exception& e) {
-    std::cerr << "Error: " << e.what() << "\n";
-    return 1;
+void BusServo::set_gripper_openclose(uint8_t servo_id,
+                                     const std::string& gripper_type,
+                                     int cmd01,
+                                     uint16_t speed) {
+  auto it = gripper_calib_.find(gripper_type);
+  if (it == gripper_calib_.end()) {
+    std::cerr << "Error: Unknown gripper type '" << gripper_type << "'\n";
+    return;
   }
-  return 0;
+
+  cmd01 = (cmd01 != 0) ? 1 : 0;
+  const auto& table = it->second;
+
+  double close_mm = table.front().first;
+  double open_mm  = table.back().first;
+
+  double target_mm = cmd01 ? open_mm : close_mm;
+  set_gripper_position(servo_id, gripper_type, target_mm, speed);
 }
+
+// ===================== main (test) =====================
+// int main(int argc, char** argv) {
+//   (void)argc; (void)argv; // 不用参数就这样消 warning
+
+//   try {
+//     BusServo servo("/dev/ttyUSB0", 1000000, 150, true);
+
+//     uint8_t servo_id = 10; // 你写死 10 就行
+
+//     std::cout << "--- TEST: 0(close) / 1(open) ---\n";
+//     servo.set_gripper_openclose(servo_id, "100mm", 0, 800);
+//     sleep_ms(5000);
+//     servo.set_gripper_openclose(servo_id, "100mm", 1, 800);
+//     sleep_ms(2000);
+
+//     servo.close();
+//   } catch (const std::exception& e) {
+//     std::cerr << "Error: " << e.what() << "\n";
+//     return 1;
+//   }
+//   return 0;
+// }

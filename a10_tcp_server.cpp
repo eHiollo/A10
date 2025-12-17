@@ -263,9 +263,9 @@ void A10TcpServer::send_follower_state(int client_sock)
         current_q.resize(12, 0.0);
     }
 
-    // 
+    //发送七维数据出去
     size_t start_idx = 0;
-    size_t end_idx = 6;
+    size_t end_idx = 7;
 
     std::string payload = "{\"q\": [";
     for (size_t i = start_idx; i < end_idx; ++i)

@@ -63,6 +63,7 @@ ${PROJECT_SOURCE_DIR}/test.cpp ${PROJECT_SOURCE_DIR}/test.hpp
 ${PROJECT_SOURCE_DIR}/movel.cpp ${PROJECT_SOURCE_DIR}/movel.hpp
 ${PROJECT_SOURCE_DIR}/a10_tcp_server.cpp ${PROJECT_SOURCE_DIR}/a10_tcp_server.hpp
 ${PROJECT_SOURCE_DIR}/master_slave.cpp ${PROJECT_SOURCE_DIR}/master_slave.hpp
+${PROJECT_SOURCE_DIR}/gripper.cpp ${PROJECT_SOURCE_DIR}/gripper.hpp
 )
 
 target_include_directories(kaanhbin PUBLIC ${PROJECT_BINARY_DIR})
