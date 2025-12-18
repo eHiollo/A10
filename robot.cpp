@@ -3564,6 +3564,11 @@ namespace robot
                     model_a1.forwardKinematics();
                     double ee1_pos[6];
                     model_a1.getOutputPos(ee1_pos);
+                    eeA2.setV(imp_->v_c);
+                    if (model_a1.inverseKinematicsVel())
+                    {
+                        mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                    }
                     saMove(ee1_pos, model_a1, 0);
             
 
@@ -3616,7 +3621,7 @@ namespace robot
 
 		}
 
-        return 20000 - count();
+        return 10000 - count();
 	}
 	ForceDrag::ForceDrag(const std::string& name)
 	{
