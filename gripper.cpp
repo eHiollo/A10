@@ -425,6 +425,11 @@ void BusServo::set_gripper_openclose(uint8_t servo_id,
   set_gripper_position(servo_id, gripper_type, target_mm, speed);
 }
 
+uint8_t BusServo::get_position(uint8_t servo_id)
+ {
+  return 0;
+}
+
 // ===================== main (test) =====================
 // int main(int argc, char** argv) {
 //   (void)argc; (void)argv; // 不用参数就这样消 warning

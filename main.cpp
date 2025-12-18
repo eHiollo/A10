@@ -14,6 +14,7 @@
 #include "kaanhbot/utility/tool_api.hpp"
 #include "plan.hpp"
 #include "a10_tcp_server.hpp"
+#include "gripper.hpp"
 
 #include "robot.hpp"
 #include "assemcomd.hpp"
@@ -22,7 +23,9 @@
 #define __S(x) #x
 #define _S(x) __S(x)
 
+//建立全局变量 让其他地方可以调用
 A10TcpServer* g_tcp_server = nullptr;
+BusServo* g_gripper = nullptr;
 
 auto xmlpath = std::filesystem::absolute(".");	//获取当前工程所在的路径
 auto logpath = std::filesystem::absolute(".");
@@ -70,18 +73,32 @@ int main(int argc, char *argv[]){
         std::cerr <<"Faild to start tcp server " << std::endl;
     }
     
+    //创建舵机实例
+    // BusServo gripper("/dev/ttyUSB0", 1000000, 150, true);
+    
+    // if (gripper.ping(10) == 0) {
+    //     gripper.set_gripper_openclose(10,"100mm",1,800);
+    //     // sleep(5000);
+    //     std::cout <<"---------Gripper Connected----------" << std::endl;
+    //     g_gripper = &gripper;
+    // } else {
+    //     std::cerr <<"Faild to start gripper " << std::endl;
+    // }
+    
+
     //新开一个进程，持续更新机器人信息
     std::thread state_update_thread([&](){
         while (true)
         {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        std::vector<double> current_q(12);
+        std::vector<double> current_q(13);
 
         for (int i = 0; i < 12; ++i){
             current_q[i] = cs.controller().motorPool()[i].actualPos();
         } 
-        //获取舵机数据并存在从臂下一维，也就是current_q[6]
+        //获取舵机数据并存在第13维，也就是current_q[12]
+        current_q[12] = g_gripper->get_position(10);
 
         tcp_server.send_set_joints(current_q);
         }

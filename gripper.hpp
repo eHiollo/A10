@@ -54,6 +54,7 @@ public:
   void close();
 
   uint8_t ping(uint8_t servo_id);
+  uint8_t get_position(uint8_t servo_id);
   std::optional<std::vector<uint8_t>> read_data(uint8_t servo_id, uint8_t address, uint8_t length);
   std::pair<std::vector<uint8_t>, uint8_t> write_data(uint8_t servo_id, uint8_t address, const std::vector<uint8_t>& values);
   std::pair<std::vector<uint8_t>, uint8_t> reg_write(uint8_t servo_id, uint8_t address, const std::vector<uint8_t>& values);

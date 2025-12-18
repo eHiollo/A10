@@ -268,11 +268,15 @@ void A10TcpServer::send_follower_state(int client_sock)
     size_t end_idx = 7;
 
     std::string payload = "{\"q\": [";
-    for (size_t i = start_idx; i < end_idx; ++i)
+    for (size_t i = start_idx; i < end_idx-1; ++i)
     {
         if (i > start_idx) payload += ", ";
         payload += std::to_string(current_q[i]);
     }
+
+    //将第12维度的舵机数据传出去
+    payload += ", ";
+    payload += std::to_string(current_q[12]);
     payload += "]}\n";
     
     // Send directly to the requesting client

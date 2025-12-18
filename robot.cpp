@@ -2,8 +2,10 @@
 #include "gravcomp.hpp"
 #include <array>
 #include "a10_tcp_server.hpp"
+#include "gripper.hpp"
 
 extern A10TcpServer *g_tcp_server;
+extern BusServo *g_gripper;
 
 
 using namespace std;
@@ -3066,6 +3068,7 @@ namespace robot
 		auto saMove = [&](double* pos_, aris::dynamic::Model& model_, int type_) {
 
 			model_.setOutputPos(pos_);
+            
 
 			if (model_.inverseKinematics())
 			{
@@ -3510,53 +3513,100 @@ namespace robot
                 }
                 saMove(current_pos, model_a2, 1);
 
-                //从臂也跟着动
-                eeA1.setV(imp_->v_c);
-                if (model_a1.inverseKinematicsVel())
-                {
-                    mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                }
+                // ----------------- 7. 将控制指令通过tcp发送出去 -----------------
+                // std::vector<double> current_q(13);
+
+                // for (int i = 0; i < 6; i++){
+                //     current_q[i+6] = current_pos[i];
+                // } 
+                // //获取舵机数据并存在第13维，也就是current_q[12]
+                // current_q[12] = g_gripper->get_position(10);
+
+                // g_tcp_server->send_set_joints(current_q);
+
+                // ----------------- 8. 接收tcp信息并让从臂运动 -----------------
+                // eeA1.setV(imp_->v_c);
+                // if (model_a1.inverseKinematicsVel())
+                // {
+                //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                // }
 
 
-                model_a2.setOutputPos(current_pos);
+                // model_a1.setOutputPos(current_pos);
 
-                if (model_a2.inverseKinematics())
-                    {
-                        throw std::runtime_error("Inverse Kinematics Position Failed!");
-                    }
-                double x_joint[6]{ 0 };
+                // if (model_a1.inverseKinematics())
+                //     {
+                //         throw std::runtime_error("Inverse Kinematics Position Failed!");
+                //     }
+                // double x_joint[6]{ 0 };
 
-                model_a2.getInputPos(x_joint);
-                for (std::size_t i = 0; i < 6; ++i)
-                {
-                    controller()->motorPool()[i].setTargetPos(x_joint[i]);
-                }
+                // model_a1.getInputPos(x_joint);
+                // for (std::size_t i = 0; i < 6; ++i)
+                // {
+                //     controller()->motorPool()[i].setTargetPos(x_joint[i]);
+                // }
 
 
                 // // ------------ 7. 从臂通过 TCP 跟随 Leader 的关节角 ------------
                 // if (g_tcp_server)
                 // {
-                //     //std::vector<double> target_q = g_tcp_server->get_target_q();
+                    //获取信息
+                    std::vector<double> target_q = g_tcp_server->get_target_q();
 
-                //     // static int printcount = 0;
-                //     // if (printcount++ % 100 == 0)
-                //     // {
-                //     //     std::cout << "点击控制 q 向量:[";
-                //     //     for (int i = 0; i < static_cast<int>(target_q.size()); ++i)
-                //     //     {
-                //     //         std::cout << target_q[i] << (i < static_cast<int>(target_q.size()) - 1 ? "," : "");
-                //     //     }
-                //     //     std::cout << "]\n";
-                //     // }
+                    double follower_targ_pos[6];
+                    for (int i = 0; i < 6; i++){
 
-                //     if (target_q.size() >= 6)
-                //     {
-                //         for (int i = 0; i < 6; ++i)
-                //         {
-                //             controller()->motorPool()[i].setTargetPos(target_q[i]);
-                //         }
-                //     }
-                // }
+                            follower_targ_pos[i] = target_q[i];
+                        }
+                    
+
+                    model_a1.setInputPos(follower_targ_pos);
+                    model_a1.forwardKinematics();
+                    double ee1_pos[6];
+                    model_a1.getOutputPos(ee1_pos);
+                    saMove(ee1_pos, model_a1, 0);
+            
+
+                    // if (model_a1.forwardKinematics())
+                    // {
+                    //     throw std::runtime_error("Forward Kinematics Position Failed!");
+                    // }
+
+                    // for (std::size_t i = 0; i < 6; ++i)
+                    // {
+                    //     controller()->motorPool()[i].setTargetPos(follower_targ_pos[i]);
+                    // }
+
+
+                    //从臂运动
+                    // eeA1.setV(imp_->v_c);
+                    // if (model_a1.inverseKinematicsVel())
+                    // {
+                    //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                    // // }
+                    // if(follower_targ_pos[0]!=0){
+                    //     saMove(follower_targ_pos, model_a1, 0); 
+                    // }
+
+                    // static int printcount = 0;
+                    // if (printcount++ % 100 == 0)
+                    // {
+                    //     std::cout << "点击控制 q 向量:[";
+                    //     for (int i = 0; i < static_cast<int>(target_q.size()); ++i)
+                    //     {
+                    //         std::cout << target_q[i] << (i < static_cast<int>(target_q.size()) - 1 ? "," : "");
+                    //     }
+                    //     std::cout << "]\n";
+                    // }
+
+                    // if (target_q.size() >= 6)
+                    // {
+                    //     for (int i = 0; i < 6; ++i)
+                    //     {
+                    //         controller()->motorPool()[i].setTargetPos(target_q[i]);
+                    //     }
+                    // }
+                //}
             }
 			else
 			{
