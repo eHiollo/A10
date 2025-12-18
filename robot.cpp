@@ -1,6 +1,7 @@
 #include "robot.hpp"
 #include "gravcomp.hpp"
 #include <array>
+#include <ostream>
 #include "a10_tcp_server.hpp"
 #include "gripper.hpp"
 
@@ -2901,7 +2902,7 @@ namespace robot
 		double Ke[6]{ 220000,220000,220000,220000,220000,220000 };
 
         double gain_trans = 2.0;
-        double gain_rot = 3.2;
+        double gain_rot = 2.5;
 
         //Parameters For Compensating rz
         double a_y = -0.0592;
@@ -3089,10 +3090,13 @@ namespace robot
 			}
 			else if (type_ == 1)
 			{
+                //std::cout<<"arm2 控制角度：";
 				for (std::size_t i = 0; i < 6; ++i)
 				{
 					controller()->motorPool()[i + 6].setTargetPos(x_joint[i]);
+                    //std::cout<< x_joint[i]<<" ,";
 				}
+                //std::cout<<std::endl;
 			}
 			else
 			{
@@ -3513,6 +3517,58 @@ namespace robot
                 }
                 saMove(current_pos, model_a2, 1);
 
+                eeA1.setV(imp_->v_c);
+                if (model_a1.inverseKinematicsVel())
+                {
+                    mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                }
+
+                if (g_tcp_server) 
+                {
+                    auto target_q = g_tcp_server->get_target_q();
+                    
+                    if (target_q.size() >= 6) 
+                    {
+                        static double q_cmd[6] = {0};
+                        static bool inited = false;
+                        
+                        // 第一次执行时，用当前实际位置初始化
+                        if (!inited)
+                        {
+                            for (int i = 0; i < 6; i++)
+                            {
+                                q_cmd[i] = controller()->motorPool()[i].actualPos();
+                            }
+                            inited = true;
+                        }
+
+                        // 每周期最大步长限制（slew rate limit），防止30Hz网络数据造成的阶跃抖动
+                        const double dq_max[6] = {0.00005,0.00005,0.00005,0.00005,0.0005,0.005}; // 可根据实际情况调整这些值
+
+                        // 对每个关节进行限幅处理
+                        for (int i = 0; i < 6; i++)
+                        {
+                            // 计算期望位置与当前位置的误差
+                            double err = target_q[i] - q_cmd[i];
+                            
+                            // 对误差进行限幅，限制单周期最大变化量
+                            if (err > dq_max[i]) 
+                            {
+                                err = dq_max[i];
+                            }
+                            if (err < -dq_max[i]) 
+                            {
+                                err = -dq_max[i];
+                            }
+
+                            q_cmd[i] += err;
+                            
+                            // 设置电机目标位置
+                            controller()->motorPool()[i].setTargetPos(q_cmd[i]);
+                        }
+                    }
+                }
+
                 // ----------------- 7. 将控制指令通过tcp发送出去 -----------------
                 // std::vector<double> current_q(13);
 
@@ -3550,26 +3606,26 @@ namespace robot
                 // // ------------ 7. 从臂通过 TCP 跟随 Leader 的关节角 ------------
                 // if (g_tcp_server)
                 // {
-                    //获取信息
-                    std::vector<double> target_q = g_tcp_server->get_target_q();
+                    // //获取信息
+                    // std::vector<double> target_q = g_tcp_server->get_target_q();
 
-                    double follower_targ_pos[6];
-                    for (int i = 0; i < 6; i++){
+                    // double follower_targ_pos[6];
+                    // for (int i = 0; i < 6; i++){
 
-                            follower_targ_pos[i] = target_q[i];
-                        }
+                    //         follower_targ_pos[i] = target_q[i];
+                    //     }
                     
 
-                    model_a1.setInputPos(follower_targ_pos);
-                    model_a1.forwardKinematics();
-                    double ee1_pos[6];
-                    model_a1.getOutputPos(ee1_pos);
-                    eeA2.setV(imp_->v_c);
-                    if (model_a1.inverseKinematicsVel())
-                    {
-                        mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                    }
-                    saMove(ee1_pos, model_a1, 0);
+                    // model_a1.setInputPos(follower_targ_pos);
+                    // model_a1.forwardKinematics();
+                    // double ee1_pos[6];
+                    // model_a1.getOutputPos(ee1_pos);
+                    // eeA2.setV(imp_->v_c);
+                    // if (model_a1.inverseKinematicsVel())
+                    // {
+                    //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                    // }
+                    // saMove(ee1_pos, model_a1, 0);
             
 
                     // if (model_a1.forwardKinematics())
