@@ -3431,14 +3431,13 @@ namespace robot
                 transform_force[4] = Tau_b[1] * imp_->gain_rot;
                 transform_force[5] = Tau_b[2] * imp_->gain_rot;
 
-                // if (count() % 50 == 0)
-                // {
-                //     mout() << "Pos:\t"
-                //         << current_pos[0] << '\t' << current_pos[1] << '\t' << current_pos[2] << '\t'
-                //         << "Force_b:\t"
-                //         << transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] << '\t'
-                //         << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] << std::endl;
-                // }
+                if (count() % 500 == 0)
+                {
+                    mout() 
+                        << "Force_b:\t"
+                        << transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] << '\t'
+                        << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] << std::endl;
+                }
 
                 // ----------------- 4. 死区 + 饱和 -----------------
                 double trigger_force[6]{ 2, 2, 2, 0.5, 0.5, 0.5 };  // 自己根据感觉调
@@ -3677,7 +3676,7 @@ namespace robot
 
 		}
 
-        return 10000 - count();
+        return 30000 - count();
 	}
 	ForceDrag::ForceDrag(const std::string& name)
 	{
