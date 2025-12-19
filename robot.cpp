@@ -3593,44 +3593,53 @@ namespace robot
                 aris::dynamic::s_rm2re(rm_target, current_pos + 3, "321");
 
                 // ----------------- 6. 下发控制（你现在用 TCP 控 follower） -----------------
-                // 这里把“segfault 风险点”全部加护栏：空指针 / size 检查 / 单次取 target
+                // ----------------- follower via TCP (30Hz target, 500Hz smooth) -----------------
+                static double q_ref[6]{0};   // TCP更新的目标参考（低频）
+                static double q_cmd[6]{0};   // 500Hz内部平滑后的指令
+                static bool q_inited = false;
+
                 if (g_tcp_server)
                 {
-                    auto target = g_tcp_server->get_target_q(); // 只取一次
+                    // 1) 读取一次TCP目标（可能30Hz更新，但我们500Hz都读也没事）
+                    auto target = g_tcp_server->get_target_q();
                     if (target.size() >= 6)
                     {
-                        // 不要在 RT 里疯狂打印，会卡死；用低频率
-                        if (count() % 500 == 0) mout() << "[DEBUG] m_fd tcp ok" << std::endl;
+                        // 只在数据有效时更新参考
+                        for (int i = 0; i < 6; ++i) q_ref[i] = target[i];
 
-                        for (int i = 0; i < 6; ++i) imp_->target_q[i] = target[i];
-
-                        // 注意：你这里原来写 forwardDynamics() 非常可疑（而且你注释写“Forward Kinematics”）
-                        // 更稳妥的是 forwardKinematics()，除非你明确需要动力学。
-                        model_a1.setInputPos(imp_->target_q);
-                        if (model_a1.forwardKinematics())
-                        {
-                            mout() << "[ERR] forwardKinematics failed" << std::endl;
-                            return 0;
-                        }
-
-                        double current_angle[6]{0};
-                        for (int i = 0; i < 6; ++i)
-                            current_angle[i] = controller()->motorPool()[i].targetPos();
-
-                        const double move = 0.0001;
-                        for (int i = 0; i < 6; ++i)
-                        {
-                            if (current_angle[i] <= imp_->target_q[i] - move)
-                                controller()->motorPool()[i].setTargetPos(current_angle[i] + move);
-                            else if (current_angle[i] >= imp_->target_q[i] + move)
-                                controller()->motorPool()[i].setTargetPos(current_angle[i] - move);
-                        }
+                        //if (count() % 500 == 0) mout() << "[DEBUG] m_fd tcp ok" << std::endl;
                     }
                     else
                     {
-                        if (count() % 500 == 0) mout() << "[WARN] tcp target_q size < 6" << std::endl;
+                        if (count() % 500 == 0) mout() << "[WARN] tcp target_q size < 6, hold last ref" << std::endl;
+                        // size不够就保持上一次 q_ref，不要动
+                    }
+
+                    for (int i = 0; i < 6; ++i)
+                        q_cmd[i] = controller()->motorPool()[i].actualPos();
+                    }
+
+                    // 3) 500Hz 限速追踪：q_ref -> q_cmd -> motor target
+                    // 每周期最大步长（slew-rate limit），专治 30Hz 阶跃抖动
+                    const double dq_max[6] = {0.002, 0.002, 0.002, 0.004, 0.004, 0.004}; // 你按实际再调
+
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        double err = q_ref[i] - q_cmd[i];
+
+                        if (err >  dq_max[i]) err =  dq_max[i];
+                        if (err < -dq_max[i]) err = -dq_max[i];
+
+                        q_cmd[i] += err;
+                        controller()->motorPool()[i].setTargetPos(q_cmd[i]);
                     }
                 }
+                else
+                {
+                    // TCP断开时：建议保持当前，不要乱跑（可选）
+                    // if (count() % 500 == 0) mout() << "[WARN] g_tcp_server null" << std::endl;
+                }
+
 
                 // ✅ 分支结束：返回剩余周期
                 return 30000 - count();
