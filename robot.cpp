@@ -2919,13 +2919,13 @@ namespace robot
 
 		double Ke[6]{ 220000,220000,220000,220000,220000,220000 };
 
-        double gain_trans = 2.0;
-        double gain_rot = 3.0;
+        double gain_trans = 4.2;
+        double gain_rot = 5.0;
 
         //Parameters For Compensating rz
-        double a_y = -0.0592;
-        double b_y = -0.9943;
-        double c_y = 0.0132;
+        // double a_y = -0.0592;
+        // double b_y = -0.9943;
+        // double c_y = 0.0132;
 
 
 		//Counter
@@ -3205,21 +3205,23 @@ namespace robot
             gc.getCompFT(a2_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force_checker + 6);
 
 
-                    for (int i = 0; i < 12; i++) {
-                    force_checker[i] = comp_force_checker[i] + raw_force_checker[i];
+                    for (int i = 0; i < 12; i++) 
+                    {
+                        force_checker[i] = comp_force_checker[i] + raw_force_checker[i];
 
-                    if (!std::isfinite(force_checker[i])) {
-                        mout() << "[BAD] force_checker NaN/Inf i=" << i << std::endl;
-                        return 0;
-                    }
+                        if (!std::isfinite(force_checker[i])) {
+                            mout() << "[BAD] force_checker NaN/Inf i=" << i << std::endl;
+                            return 0;
+                        }
 
-                    if (std::abs(force_checker[i]) > 3.0) {
-                        mout() << "[CONTACT] i=" << i
-                            << " raw=" << raw_force_checker[i]
-                            << " comp=" << comp_force_checker[i]
-                            << " sum=" << force_checker[i] << std::endl;
-                        imp_->contact_check = true;
-                        break;
+                        if (std::abs(force_checker[i]) > 3.0) {
+                            mout() << "[CONTACT] i=" << i
+                                << " raw=" << raw_force_checker[i]
+                                << " comp=" << comp_force_checker[i]
+                                << " sum=" << force_checker[i] << std::endl;
+                            imp_->contact_check = true;
+                            break;
+                        }
                     }
         }
 		else
@@ -3408,6 +3410,7 @@ namespace robot
                 getForceData(current_force, 1, imp_->init);
                 gc.getCompFT(current_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force);
 
+
                 for (int i = 0; i < 6; ++i)
                 {
                     actual_force[i] = comp_force[i] + current_force[i];
@@ -3520,8 +3523,8 @@ namespace robot
                 }
 
                 // ----------------- 4. 死区 + 饱和 -----------------
-                double trigger_force[6]{ 2, 2, 1.0, 0.5, 0.5, 0.5 }; // z 稍大点不敏感，先稳住漂移
-                double max_force[6]{ 40, 40, 40, 5, 5, 5 };
+                double trigger_force[6]{ 2, 2, 2.0, 0.5, 0.5, 0.5 }; // z 稍大点不敏感，先稳住漂移
+                double max_force[6]{ 40, 40, 40, 6, 6, 6 };
 
                 for (int i = 0; i < 6; ++i)
                 {
@@ -3591,6 +3594,18 @@ namespace robot
                 aris::dynamic::s_re2rm(current_pos + 3, rm_c, "321");
                 aris::dynamic::s_mm(3, 3, 3, drm, rm_c, rm_target);
                 aris::dynamic::s_rm2re(rm_target, current_pos + 3, "321");
+
+                // ----------------- 6. Arm2：速度+位置下发 -----------------
+                eeA2.setV(imp_->v_c);
+
+                if (model_a2.inverseKinematicsVel())
+                {
+                    mout() << "[ERROR] inverseKinematicsVel failed (arm2)" << std::endl;
+                }
+                else
+                {
+                    saMove(current_pos, model_a2, 1);  // mode=1 表示 arm2
+                }
 
                 // ----------------- 6. 下发控制（你现在用 TCP 控 follower） -----------------
                 // ----------------- follower via TCP (30Hz target, 500Hz smooth) -----------------
