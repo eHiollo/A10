@@ -1,34 +1,3 @@
-#pragma once
-
-#include <cstdint>
-#include <map>
-#include <optional>
-#include <string>
-#include <utility>
-#include <vector>
-
-class SerialPort {
-public:
-  SerialPort();
-  ~SerialPort();
-
-  bool open(const std::string& port, int baudrate, int timeout_ms);
-  void close();
-  bool isOpen() const;
-
-  void resetInputBuffer();
-  bool writeAll(const std::vector<uint8_t>& data);
-  std::optional<std::vector<uint8_t>> readExact(size_t n, int timeout_ms_override = -1);
-
-private:
-  bool set_baudrate_termios_(int baudrate);
-
-private:
-  int fd_{-1};
-  int timeout_ms_{150};
-  bool is_open_{false};
-};
-
 class BusServo {
 public:
   struct SensorData {
@@ -54,7 +23,13 @@ public:
   void close();
 
   uint8_t ping(uint8_t servo_id);
+
+  // 兼容旧接口：返回 0~100 (%)，内部用回读 mm 计算
   uint8_t get_position(uint8_t servo_id);
+
+  // ✅ 新增：回读夹爪实际开口（mm）
+  std::optional<double> get_position_mm(uint8_t servo_id, const std::string& gripper_type);
+
   std::optional<std::vector<uint8_t>> read_data(uint8_t servo_id, uint8_t address, uint8_t length);
   std::pair<std::vector<uint8_t>, uint8_t> write_data(uint8_t servo_id, uint8_t address, const std::vector<uint8_t>& values);
   std::pair<std::vector<uint8_t>, uint8_t> reg_write(uint8_t servo_id, uint8_t address, const std::vector<uint8_t>& values);
@@ -83,6 +58,10 @@ private:
   Resp receive_packet_();
 
   int interpolate_(double value, const std::vector<std::pair<double, int>>& table);
+
+  // ✅ 新增：反向插值 servo_pos -> mm
+  double inverse_interpolate_mm_(int servo_pos, const std::vector<std::pair<double, int>>& table);
+
   void init_calibration_();
 
 private:

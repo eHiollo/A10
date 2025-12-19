@@ -371,6 +371,58 @@ int BusServo::interpolate_(double value, const std::vector<std::pair<double, int
   return table.back().second;
 }
 
+// 反向插值：给定 servo_pos(0~4096) -> mm
+double BusServo::inverse_interpolate_mm_(int servo_pos,
+                                        const std::vector<std::pair<double, int>>& table) {
+  if (table.empty()) return 0.0;
+
+  // table: (mm, pos)，注意 pos 可能是递减的（你 100mm 表就是递减）
+  // 我们遍历相邻段，找到 servo_pos 落在哪一段之间
+  for (size_t i = 0; i + 1 < table.size(); ++i) {
+    double mm0 = table[i].first;
+    int    p0  = table[i].second;
+    double mm1 = table[i + 1].first;
+    int    p1  = table[i + 1].second;
+
+    // 判断 servo_pos 是否在 [p0,p1] 或 [p1,p0] 之间
+    int lo = std::min(p0, p1);
+    int hi = std::max(p0, p1);
+    if (servo_pos >= lo && servo_pos <= hi) {
+      // 线性插值：用 position 在 p0->p1 的比例，映射到 mm0->mm1
+      double denom = double(p1 - p0);
+      if (std::abs(denom) < 1e-9) return mm0;
+      double t = (double(servo_pos) - double(p0)) / denom;  // t in [0,1] (可能反向)
+      double mm = mm0 + t * (mm1 - mm0);
+      return mm;
+    }
+  }
+
+  // 超出表范围：夹到最近端
+  // 如果位置更接近 front / back，就返回对应 mm
+  int pf = table.front().second;
+  int pb = table.back().second;
+  if (std::abs(servo_pos - pf) < std::abs(servo_pos - pb)) return table.front().first;
+  return table.back().first;
+}
+
+// 读取舵机当前开口（mm）
+std::optional<double> BusServo::get_position_mm(uint8_t servo_id,
+                                                const std::string& gripper_type) {
+  auto it = gripper_calib_.find(gripper_type);
+  if (it == gripper_calib_.end()) return std::nullopt;
+
+  auto s = read_sensor_data(servo_id);
+  if (!s) return std::nullopt;
+
+  int pos = s->position; // 原始回读
+  // 有些舵机可能返回负数或超过范围，你可 clamp 一下
+  pos = std::clamp(pos, 0, 4096);
+
+  double mm = inverse_interpolate_mm_(pos, it->second);
+  return mm;
+}
+
+
 void BusServo::init_calibration_() {
   gripper_calib_["100mm"] = {
     {0, 3434}, {10, 3060}, {20, 2824}, {30, 2646}, {40, 2490},
