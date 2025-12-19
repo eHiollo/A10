@@ -119,48 +119,63 @@ auto GravComp::getPLMatrix(double f_r_matrix_[54], double torque_force_data_[9],
 
 // get compensated force
 auto GravComp::getCompFT(double current_pose_[16], double L_[6], double P_[6], double comp_f_[6]) -> void {
-	double current_rotate[9]{ 0 };
-	double inv_rotate[9]{ 0 };
+    double current_rotate[9]{ 0 };
+    double inv_rotate[9]{ 0 };
 
-	double G_vector[3]{ 0 };
-	double F_vector[3]{ 0 };
-	double L_vector[3]{ 0 };
-	double Mass_center[3]{ 0 };
-	double K_vector[3]{ 0 };
+    double G_vector[3]{ 0 };      // G in sensor/ee frame after rotation
+    double F_vector[3]{ 0 };      // force bias term
+    double L_vector[3]{ 0 };      // Lx Ly Lz (gravity direction / vector in base? then rotated)
+    double Mass_center[3]{ 0 };   // r = [x0 y0 z0]
+    double K_vector[3]{ 0 };      // k1 k2 k3 (constant torque bias)
 
-	double Mg[3]{ 0 };
-	double M0[3]{ 0 };
+    // Read parameters
+    std::copy(L_ + 3, L_ + 6, F_vector);        // fx0 fy0 fz0
+    std::copy(L_,     L_ + 3, L_vector);        // lx ly lz
+    std::copy(P_,     P_ + 3, Mass_center);     // x0 y0 z0
+    std::copy(P_ + 3, P_ + 6, K_vector);        // k1 k2 k3
 
-	std::copy(L_ + 3, L_ + 6, F_vector);  // fx0 fy0 fz0
-    //aris::dynamic::dsp(1, 3, F_vector);
-	std::copy(L_, L_ + 3, L_vector);  // lx ly lz -> Gx Gy Gz
-	std::copy(P_, P_ + 3, Mass_center);  // x0 y0 z0 -> Mgx Mgy Mgz
-	std::copy(P_ + 3, P_ + 6, K_vector);  // k1 k2 k3 -> Mx0 My0 Mz0
-
-	aris::dynamic::s_pm2rm(current_pose_, current_rotate);
+    // current_pose -> rotation
+    aris::dynamic::s_pm2rm(current_pose_, current_rotate);
     getInverseRm(current_rotate, inv_rotate);
 
-    aris::dynamic::s_mm(3,1,3,inv_rotate,L_vector,G_vector);
-    //aris::dynamic::dsp(1, 3, G_vector);
+    // G_vector = inv_rotate * L_vector
+    aris::dynamic::s_mm(3, 1, 3, inv_rotate, L_vector, G_vector);
 
-	// comp x y z
-	for (int i = 0; i < 3; i++) {
-		comp_f_[i] = -F_vector[i] - G_vector[i];
-	}
+    // ---------- force compensation ----------
+    // comp_f(force) = -(F0 + G)
+    for (int i = 0; i < 3; ++i) {
+        comp_f_[i] = -F_vector[i] - G_vector[i];
+    }
 
-	Mg[0] = -G_vector[2] * Mass_center[1] - G_vector[1] * Mass_center[2];
-	Mg[1] = -G_vector[0] * Mass_center[2] - G_vector[2] * Mass_center[0];
-	Mg[2] = -G_vector[1] * Mass_center[0] - G_vector[0] * Mass_center[1];
+    // ---------- torque compensation (FIXED) ----------
+    // Use cross products to avoid axis-mix bugs.
+    auto cross = [](const double a[3], const double b[3], double c[3]) {
+        c[0] = a[1] * b[2] - a[2] * b[1];
+        c[1] = a[2] * b[0] - a[0] * b[2];
+        c[2] = a[0] * b[1] - a[1] * b[0];
+    };
 
-	M0[0] = K_vector[0] - F_vector[1] * Mass_center[2] - F_vector[2] * Mass_center[1];
-	M0[1] = K_vector[1] - F_vector[2] * Mass_center[0] - F_vector[1] * Mass_center[2];
-	M0[2] = K_vector[2] - F_vector[0] * Mass_center[1] - F_vector[0] * Mass_center[0];
+    double r_cross_G[3]{0};
+    double r_cross_F0[3]{0};
+    cross(Mass_center, G_vector, r_cross_G);
+    cross(Mass_center, F_vector, r_cross_F0);
 
-	// comp mx my mz
-	for (int i = 3; i < 6; i++) {
-		comp_f_[i] = -M0[i - 3] - Mg[i - 3];
-	}
+    // Keep your original sign convention:
+    // M0 = K - (r × F0)
+    // Mg = (r × G)
+    double M0[3]{
+        K_vector[0] - r_cross_F0[0],
+        K_vector[1] - r_cross_F0[1],
+        K_vector[2] - r_cross_F0[2]
+    };
+    double Mg[3]{ r_cross_G[0], r_cross_G[1], r_cross_G[2] };
+
+    // comp_f(torque) = -(M0 + Mg)
+    for (int i = 0; i < 3; ++i) {
+        comp_f_[i + 3] = -M0[i] - Mg[i];
+    }
 }
+
 
 
 auto GravComp::savePLVector(const double P1_[6], const double L1_[6], const double P2_[6], const double L2_[6]) -> void {
