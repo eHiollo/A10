@@ -3205,17 +3205,22 @@ namespace robot
             gc.getCompFT(a2_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force_checker + 6);
 
 
-            for (int i = 0; i < 12; i++)
-            {
-                force_checker[i] = comp_force_checker[i] + raw_force_checker[i];
+                    for (int i = 0; i < 12; i++) {
+                    force_checker[i] = comp_force_checker[i] + raw_force_checker[i];
 
-                if (abs(force_checker[i]) > 3.0)
-                {
-                    imp_->contact_check = true;
-                    mout() << "Contact Check" << std::endl;
-                    break;
-                }
-            }
+                    if (!std::isfinite(force_checker[i])) {
+                        mout() << "[BAD] force_checker NaN/Inf i=" << i << std::endl;
+                        return 0;
+                    }
+
+                    if (std::abs(force_checker[i]) > 3.0) {
+                        mout() << "[CONTACT] i=" << i
+                            << " raw=" << raw_force_checker[i]
+                            << " comp=" << comp_force_checker[i]
+                            << " sum=" << force_checker[i] << std::endl;
+                        imp_->contact_check = true;
+                        break;
+                    }
         }
 		else
 		{
