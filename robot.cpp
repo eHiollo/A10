@@ -3377,33 +3377,47 @@ namespace robot
 				}
 
 			}
+            // ======= ForceDrag: m == 1 branch (FULL, drop-in) =======
             else if (imp_->m_ == 1)
             {
+                // ----------------- 0. 安全：关键指针 / NaN 检查 -----------------
+                if (!imp_->init)
+                {
+                    mout() << "[WARN] ForceDrag called but imp_->init == false" << std::endl;
+                    return 30000 - count();
+                }
+
                 // ----------------- 1. 读取当前末端状态 -----------------
                 double current_vel[6]{0};
-                eeA2.getP(current_pos);      // pe: [x,y,z,rx,ry,rz] in base frame
-                eeA2.getV(current_vel);      // 末端速度（笛卡尔）
-                eeA2.getMpm(current_pm);     // 齐次变换矩阵 B_T_E
+                eeA2.getP(current_pos);          // pe: [x,y,z,rx,ry,rz] in base frame
+                eeA2.getV(current_vel);          // ee cartesian velocity
+                eeA2.getMpm(current_pm);         // base_T_ee 4x4 pm
 
-                // 从 current_pm 里取出 R_be (base -> ee 的旋转矩阵)
+                // 从 current_pm 里取出 R_be (base <- ee 的旋转矩阵, 用于 ee->base: F_b = R_be * F_e)
                 double rm_be[9];
-                rm_be[0] = current_pm[0];  rm_be[1] = current_pm[1];  rm_be[2] = current_pm[2];
-                rm_be[3] = current_pm[4];  rm_be[4] = current_pm[5];  rm_be[5] = current_pm[6];
-                rm_be[6] = current_pm[8];  rm_be[7] = current_pm[9];  rm_be[8] = current_pm[10];
+                rm_be[0] = current_pm[0];   rm_be[1] = current_pm[1];   rm_be[2] = current_pm[2];
+                rm_be[3] = current_pm[4];   rm_be[4] = current_pm[5];   rm_be[5] = current_pm[6];
+                rm_be[6] = current_pm[8];   rm_be[7] = current_pm[9];   rm_be[8] = current_pm[10];
 
-                // ----------------- 2. 力传感器 + 重力补偿 -----------------
-                double current_force[6]{0};   // 传感器坐标系下（这里你说和 EE 一致）
-                double comp_force[6]{0};      // 理论重力补偿力
-                double actual_force[6]{0};    // 接触力 = 重力补偿 + 传感器读数
-                double filtered_force[6]{0};  // 滤波后的力
+                // ----------------- 2. 力传感器 + 重力补偿（EE系） -----------------
+                double current_force[6]{0};    // sensor/ee frame, init removed inside getForceData
+                double comp_force[6]{0};       // grav-comp in ee frame (from PL)
+                double actual_force[6]{0};     // contact = comp + sensor
+                double filtered_force[6]{0};   // filtered contact force (ee frame)
 
-                // getForceData 内部已经减掉 init force
                 getForceData(current_force, 1, imp_->init);
                 gc.getCompFT(current_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force);
 
                 for (int i = 0; i < 6; ++i)
                 {
                     actual_force[i] = comp_force[i] + current_force[i];
+                    if (!std::isfinite(actual_force[i]))
+                    {
+                        mout() << "[BAD] actual_force NaN/Inf i=" << i
+                            << " cur=" << current_force[i]
+                            << " comp=" << comp_force[i] << std::endl;
+                        return 0;
+                    }
                 }
 
                 if (count() % 50 == 0)
@@ -3415,7 +3429,7 @@ namespace robot
                         << current_force[3] + imp_->arm2_init_force[3] << '\t'
                         << current_force[4] + imp_->arm2_init_force[4] << '\t'
                         << current_force[5] + imp_->arm2_init_force[5] << '\t'
-                        << "comp\t"
+                        << "comp+raw\t"
                         << actual_force[0] << '\t'
                         << actual_force[1] << '\t'
                         << actual_force[2] << '\t'
@@ -3424,11 +3438,10 @@ namespace robot
                         << actual_force[5] << std::endl;
                 }
 
-                // 滤波
+                // 滤波（在 EE/传感器系）
                 forceFilter(actual_force, filtered_force);
 
                 // ----------------- 3. 力从 EE 坐标系变到 Base 坐标系 -----------------
-                // F_e, Tau_e 都是在 EE 坐标系下（传感器 = EE）
                 double F_e[3]   = { filtered_force[0], filtered_force[1], filtered_force[2] };
                 double Tau_e[3] = { filtered_force[3], filtered_force[4], filtered_force[5] };
 
@@ -3437,33 +3450,33 @@ namespace robot
 
                 for (int i = 0; i < 3; ++i)
                 {
-                    F_b[i] = 0.0;
-                    Tau_b[i] = 0.0;
                     for (int j = 0; j < 3; ++j)
                     {
                         F_b[i]   += rm_be[3 * i + j] * F_e[j];
                         Tau_b[i] += rm_be[3 * i + j] * Tau_e[j];
                     }
+                    if (!std::isfinite(F_b[i]) || !std::isfinite(Tau_b[i]))
+                    {
+                        mout() << "[BAD] transform to base NaN/Inf i=" << i << std::endl;
+                        return 0;
+                    }
                 }
 
                 double transform_force[6]{0};
-                transform_force[0] = F_b[0] * imp_->gain_trans;
-                transform_force[1] = F_b[1] * imp_->gain_trans;
-                transform_force[2] = F_b[2] * imp_->gain_trans;
+                transform_force[0] = F_b[0]   * imp_->gain_trans;
+                transform_force[1] = F_b[1]   * imp_->gain_trans;
+                transform_force[2] = F_b[2]   * imp_->gain_trans;
                 transform_force[3] = Tau_b[0] * imp_->gain_rot;
                 transform_force[4] = Tau_b[1] * imp_->gain_rot;
                 transform_force[5] = Tau_b[2] * imp_->gain_rot;
 
-                // ---- 零偏估计与消除（放在死区/饱和之前） ----
+                // ----------------- 3.5 零偏估计与消除（在死区前） -----------------
                 static double bias[6] = {0};
-                const double alpha = 0.005;  // 慢速学习，更稳定
+                const double alpha = 0.005;     // 慢速学习
+                const double v_th_lin = 0.01;   // m/s
+                const double v_th_rot = 0.05;   // rad/s
 
-                // 使用末端速度判断"无人推动、基本静止"状态，用于更新零偏
-                const double v_th_lin = 0.01;  // 线速度阈值(m/s)
-                const double v_th_rot = 0.05;   // 角速度阈值(rad/s)
-
-                // 判断是否接近静止状态
-                bool near_static = 
+                bool near_static =
                     (std::abs(current_vel[0]) < v_th_lin &&
                     std::abs(current_vel[1]) < v_th_lin &&
                     std::abs(current_vel[2]) < v_th_lin &&
@@ -3471,64 +3484,74 @@ namespace robot
                     std::abs(current_vel[4]) < v_th_rot &&
                     std::abs(current_vel[5]) < v_th_rot);
 
-                // 仅在静止状态时更新零偏估计
                 if (near_static)
                 {
                     for (int i = 0; i < 6; ++i)
-                    {
                         bias[i] = (1.0 - alpha) * bias[i] + alpha * transform_force[i];
-                    }
                 }
 
-                // 去除零偏后再进行后续的死区/饱和处理和导纳计算
                 for (int i = 0; i < 6; ++i)
-                {
                     transform_force[i] -= bias[i];
+
+                // ----------------- 3.6 防漂：无外力时清零速度 + 泄漏 -----------------
+                // 你现在“会一直往 z 走”，这两段是硬保险
+                bool no_force = true;
+                const double nf_lin = 0.30;   // N
+                const double nf_rot = 0.03;   // Nm
+                for (int i = 0; i < 3; ++i) if (std::abs(transform_force[i])   > nf_lin) no_force = false;
+                for (int i = 3; i < 6; ++i) if (std::abs(transform_force[i])   > nf_rot) no_force = false;
+
+                if (no_force && near_static)
+                {
+                    for (int i = 0; i < 6; ++i) imp_->v_c[i] = 0.0;  // 无接触 + 静止：彻底止漂
                 }
+
+                // 泄漏（防止残余偏差积分累计）
+                const double leak_lin = 0.01;  // 线速度泄漏
+                const double leak_rot = 0.02;  // 角速度泄漏
+                for (int i = 0; i < 3; ++i) imp_->v_c[i] *= (1.0 - leak_lin);
+                for (int i = 3; i < 6; ++i) imp_->v_c[i] *= (1.0 - leak_rot);
 
                 if (count() % 500 == 0)
                 {
-                    mout() 
-                        << "Force_b:\t"
+                    mout() << "Force_b:\t"
                         << transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] << '\t'
                         << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] << std::endl;
                 }
 
                 // ----------------- 4. 死区 + 饱和 -----------------
-                double trigger_force[6]{ 2, 2, 2, 0.5, 0.5, 0.5 };  // 自己根据感觉调
-                double max_force[6]{ 40, 40, 40, 5, 5, 5 };         // 最大力 / 力矩限制
+                double trigger_force[6]{ 2, 2, 1.0, 0.5, 0.5, 0.5 }; // z 稍大点不敏感，先稳住漂移
+                double max_force[6]{ 40, 40, 40, 5, 5, 5 };
 
                 for (int i = 0; i < 6; ++i)
                 {
                     if (std::abs(transform_force[i]) < trigger_force[i])
-                    {
                         transform_force[i] = 0.0;
-                    }
-                    if (transform_force[i] > max_force[i])
-                    {
-                        transform_force[i] = max_force[i];
-                    }
-                    if (transform_force[i] < -max_force[i])
-                    {
-                        transform_force[i] = -max_force[i];
-                    }
+
+                    if (transform_force[i] >  max_force[i]) transform_force[i] =  max_force[i];
+                    if (transform_force[i] < -max_force[i]) transform_force[i] = -max_force[i];
                 }
 
-                // ----------------- 5. 6 维阻抗：3 平移 + 3 转动 -----------------
-                double acc[3]{0};   // 线加速度
-                double ome[3]{0};   // 角加速度
-                double dx[3]{0};    // 位置增量
-                double dth[3]{0};   // 姿态增量 (小角度)
-                double dt = 0.002;  // 控制周期
+                // ----------------- 5. 6 维导纳（3 平移 + 3 转动） -----------------
+                double acc[3]{0};
+                double ome[3]{0};
+                double dx[3]{0};
+                double dth[3]{0};
+                const double dt = 0.002;
 
-                // 5.1 平移阻抗：x,y,z
+                // 5.1 平移
                 for (int i = 0; i < 3; ++i)
                 {
-                    // 这里用的是 M-B 阻尼 + 期望外力 f_d，如果你想加刚度项可以再 -K[i]*(x-x_d)
                     acc[i] = (-imp_->f_d[i]
                             + transform_force[i]
                             - imp_->B[i] * (imp_->v_c[i] - imp_->v_d[i]))
                             / imp_->M[i];
+
+                    if (!std::isfinite(acc[i]))
+                    {
+                        mout() << "[BAD] acc NaN/Inf i=" << i << std::endl;
+                        return 0;
+                    }
                 }
 
                 for (int i = 0; i < 3; ++i)
@@ -3538,13 +3561,19 @@ namespace robot
                     current_pos[i] += dx[i];
                 }
 
-                // 5.2 旋转阻抗：rx, ry, rz
+                // 5.2 旋转
                 for (int i = 0; i < 3; ++i)
                 {
                     ome[i] = (-imp_->f_d[i + 3]
                             + transform_force[i + 3]
                             - imp_->B[i + 3] * (imp_->v_c[i + 3] - imp_->v_d[i + 3]))
                             / imp_->M[i + 3];
+
+                    if (!std::isfinite(ome[i]))
+                    {
+                        mout() << "[BAD] ome NaN/Inf i=" << i << std::endl;
+                        return 0;
+                    }
                 }
 
                 for (int i = 0; i < 3; ++i)
@@ -3553,184 +3582,58 @@ namespace robot
                     dth[i] = imp_->v_c[i + 3] * dt;
                 }
 
-                // //--------添加速度衰减，消除力惨差导致的速度积分累计
-                // const double leak = 0.002;
-                // for(int i = 0 ; i<6 ; i++){
-                //     imp_->v_c[i]*=(1-leak);
-                // }
-
-                // 把小角度 dth 转成增量旋转矩阵，然后左乘当前姿态
+                // 小角度 dth -> 增量旋转矩阵，再左乘当前姿态
                 double drm[9]{0};
                 double rm_c[9]{0};
                 double rm_target[9]{0};
 
-                aris::dynamic::s_ra2rm(dth, drm);                    // dth -> R(dth)
-                aris::dynamic::s_re2rm(current_pos + 3, rm_c, "321"); // 当前欧拉角 -> 当前 R
-                aris::dynamic::s_mm(3, 3, 3, drm, rm_c, rm_target);   // R_target = R(dth)*R_current
-                aris::dynamic::s_rm2re(rm_target, current_pos + 3, "321"); // R_target -> 欧拉角，写回 current_pos[3..5]
+                aris::dynamic::s_ra2rm(dth, drm);
+                aris::dynamic::s_re2rm(current_pos + 3, rm_c, "321");
+                aris::dynamic::s_mm(3, 3, 3, drm, rm_c, rm_target);
+                aris::dynamic::s_rm2re(rm_target, current_pos + 3, "321");
 
-                // ----------------- 6. 速度 + 位置下发 -----------------
-                // eeA2.setV(imp_->v_c);
-                // if (model_a2.inverseKinematicsVel())
-                // {
-                //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                // }
-                // saMove(current_pos, model_a2, 1);
-
-                // eeA1.setV(imp_->v_c);
-                // if (model_a1.inverseKinematicsVel())
-                // {
-                //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                // }
-
-                if (g_tcp_server) 
-                {   
-                    mout() << "[DEBUG]m_fd进入tcp" << std::endl;
-                    for (int i =0 ; i<6 ; i++){
-                        imp_->target_q[i]= g_tcp_server->get_target_q()[i];
-                    }
-
-                    model_a1.setInputPos(imp_->target_q);
-
-                    if (model_a1.forwardDynamics())
+                // ----------------- 6. 下发控制（你现在用 TCP 控 follower） -----------------
+                // 这里把“segfault 风险点”全部加护栏：空指针 / size 检查 / 单次取 target
+                if (g_tcp_server)
+                {
+                    auto target = g_tcp_server->get_target_q(); // 只取一次
+                    if (target.size() >= 6)
                     {
-                        throw std::runtime_error("Forward Kinematics Position Failed!");
-                    }
+                        // 不要在 RT 里疯狂打印，会卡死；用低频率
+                        if (count() % 500 == 0) mout() << "[DEBUG] m_fd tcp ok" << std::endl;
 
+                        for (int i = 0; i < 6; ++i) imp_->target_q[i] = target[i];
 
-                    double current_angle[6] = { 0 };
-
-                    for (int i = 0; i < 6; i++)
-                    {
-                        current_angle[i] = controller()->motorPool()[i].targetPos();
-                    }
-
-                    //通过move确定每次微小位移大小
-                    double move = 0.0001;
-                    for (int i = 0; i < 6; i++)
-                    {
-                        if (current_angle[i] <= imp_->target_q[i] - move)
+                        // 注意：你这里原来写 forwardDynamics() 非常可疑（而且你注释写“Forward Kinematics”）
+                        // 更稳妥的是 forwardKinematics()，除非你明确需要动力学。
+                        model_a1.setInputPos(imp_->target_q);
+                        if (model_a1.forwardKinematics())
                         {
-                            controller()->motorPool()[i].setTargetPos(current_angle[i] + move);
+                            mout() << "[ERR] forwardKinematics failed" << std::endl;
+                            return 0;
                         }
-                        else if (current_angle[i] >= imp_->target_q[i] + move)
+
+                        double current_angle[6]{0};
+                        for (int i = 0; i < 6; ++i)
+                            current_angle[i] = controller()->motorPool()[i].targetPos();
+
+                        const double move = 0.0001;
+                        for (int i = 0; i < 6; ++i)
                         {
-                            controller()->motorPool()[i].setTargetPos(current_angle[i] - move);
+                            if (current_angle[i] <= imp_->target_q[i] - move)
+                                controller()->motorPool()[i].setTargetPos(current_angle[i] + move);
+                            else if (current_angle[i] >= imp_->target_q[i] + move)
+                                controller()->motorPool()[i].setTargetPos(current_angle[i] - move);
                         }
                     }
-                }  
-                    
-            
+                    else
+                    {
+                        if (count() % 500 == 0) mout() << "[WARN] tcp target_q size < 6" << std::endl;
+                    }
+                }
 
-                // ----------------- 7. 将控制指令通过tcp发送出去 -----------------
-                // std::vector<double> current_q(13);
-
-                // for (int i = 0; i < 6; i++){
-                //     current_q[i+6] = current_pos[i];
-                // } 
-                // //获取舵机数据并存在第13维，也就是current_q[12]
-                // current_q[12] = g_gripper->get_position(10);
-
-                // g_tcp_server->send_set_joints(current_q);
-
-                // ----------------- 8. 接收tcp信息并让从臂运动 -----------------
-                // eeA1.setV(imp_->v_c);
-                // if (model_a1.inverseKinematicsVel())
-                // {
-                //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                // }
-
-
-                // model_a1.setOutputPos(current_pos);
-
-                // if (model_a1.inverseKinematics())
-                //     {
-                //         throw std::runtime_error("Inverse Kinematics Position Failed!");
-                //     }
-                // double x_joint[6]{ 0 };
-
-                // model_a1.getInputPos(x_joint);
-                // for (std::size_t i = 0; i < 6; ++i)
-                // {
-                //     controller()->motorPool()[i].setTargetPos(x_joint[i]);
-                // }
-
-
-                // // ------------ 7. 从臂通过 TCP 跟随 Leader 的关节角 ------------
-                // if (g_tcp_server)
-                // {
-                    // //获取信息
-                    // std::vector<double> target_q = g_tcp_server->get_target_q();
-
-                    // double follower_targ_pos[6];
-                    // for (int i = 0; i < 6; i++){
-
-                    //         follower_targ_pos[i] = target_q[i];
-                    //     }
-                    
-
-                    // model_a1.setInputPos(follower_targ_pos);
-                    // model_a1.forwardKinematics();
-                    // double ee1_pos[6];
-                    // model_a1.getOutputPos(ee1_pos);
-                    // eeA2.setV(imp_->v_c);
-                    // if (model_a1.inverseKinematicsVel())
-                    // {
-                    //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                    // }
-                    // saMove(ee1_pos, model_a1, 0);
-            
-
-                    // if (model_a1.forwardKinematics())
-                    // {
-                    //     throw std::runtime_error("Forward Kinematics Position Failed!");
-                    // }
-
-                    // for (std::size_t i = 0; i < 6; ++i)
-                    // {
-                    //     controller()->motorPool()[i].setTargetPos(follower_targ_pos[i]);
-                    // }
-
-
-                    //从臂运动
-                    // eeA1.setV(imp_->v_c);
-                    // if (model_a1.inverseKinematicsVel())
-                    // {
-                    //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                    // // }
-                    // if(follower_targ_pos[0]!=0){
-                    //     saMove(follower_targ_pos, model_a1, 0); 
-                    // }
-
-                    // static int printcount = 0;
-                    // if (printcount++ % 100 == 0)
-                    // {
-                    //     std::cout << "点击控制 q 向量:[";
-                    //     for (int i = 0; i < static_cast<int>(target_q.size()); ++i)
-                    //     {
-                    //         std::cout << target_q[i] << (i < static_cast<int>(target_q.size()) - 1 ? "," : "");
-                    //     }
-                    //     std::cout << "]\n";
-                    // }
-
-                    // if (target_q.size() >= 6)
-                    // {
-                    //     for (int i = 0; i < 6; ++i)
-                    //     {
-                    //         controller()->motorPool()[i].setTargetPos(target_q[i]);
-                    //     }
-                    // }
-                //}
-            }
-			else
-			{
-				mout() << "Wrong Model" << std::endl;
-				return 0;
-			}
-
-		}
-
-        return 30000 - count();
+                // ✅ 分支结束：返回剩余周期
+                return 30000 - count();
 	}
 	ForceDrag::ForceDrag(const std::string& name)
 	{
