@@ -1566,6 +1566,11 @@ namespace robot
 					imp_->stop_count = 1;
 					imp_->current_stop_time = count();
 					imp_->stop_flag = true;
+                    //状态数据清零
+                    for(int i=0;i<6;i++)
+                    {
+                        imp_->arm1_temp_force_1[i]=0; imp_->arm2_temp_force_1[i]=0;
+                    }
 					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
 				}
 
@@ -1588,6 +1593,11 @@ namespace robot
 					imp_->stop_count = 2;
 					imp_->current_stop_time = count();
 					imp_->stop_flag = true;
+                    //状态数据清零
+                    for(int i=0;i<6;i++)
+                    {
+                        imp_->arm1_temp_force_1[i]=0; imp_->arm2_temp_force_1[i]=0;
+                    }
 					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
 				}
 			}
@@ -1609,6 +1619,11 @@ namespace robot
 					imp_->stop_count = 3;
 					imp_->current_stop_time = count();
 					imp_->stop_flag = true;
+                    //状态数据清零
+                    for(int i=0;i<6;i++)
+                    {
+                        imp_->arm1_temp_force_1[i]=0; imp_->arm2_temp_force_1[i]=0;
+                    }
 					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
 
 				}
@@ -2880,6 +2895,9 @@ namespace robot
 		double arm1_x_d[6]{ 0 };
 		double arm2_x_d[6]{ 0 };
 
+        //从臂运动目标角度，从tcp更新这个参数
+        double target_q[6]{0};
+
 		double v_d[6]{ 0 };
 		double a_d[6]{ 0 };
 		double f_d[6]{ 0 };
@@ -2902,7 +2920,7 @@ namespace robot
 		double Ke[6]{ 220000,220000,220000,220000,220000,220000 };
 
         double gain_trans = 2.0;
-        double gain_rot = 2.5;
+        double gain_rot = 3.0;
 
         //Parameters For Compensating rz
         double a_y = -0.0592;
@@ -3313,33 +3331,33 @@ namespace robot
                 //saMove(current_pos, model_a1, 0);
                 
                 // //------------ 3. 从臂：通过 TCP 跟随 Leader 的目标关节 ------------
-                
-                if (g_tcp_server)
-                {
-                    std::vector<double> target_q = g_tcp_server->get_target_q();
+                // m==0
+                // if (g_tcp_server)
+                // {
+                //     std::vector<double> target_q = g_tcp_server->get_target_q();
 
 
-                    // static int printcount = 0;
-                    // if( printcount++ % 100 ==0)
-                    // {   std::cout << "点击控制q向量:[";
-                    //     for ( int i = 0; i < target_q.size(); ++i)
-                    //     {
-                    //         std::cout << target_q[i] << (i < target_q.size() - 1 ? ",":"" );
-                    //     }
-                    //     std::cout << "]\n";
-                    // }
+                //     // static int printcount = 0;
+                //     // if( printcount++ % 100 ==0)
+                //     // {   std::cout << "点击控制q向量:[";
+                //     //     for ( int i = 0; i < target_q.size(); ++i)
+                //     //     {
+                //     //         std::cout << target_q[i] << (i < target_q.size() - 1 ? ",":"" );
+                //     //     }
+                //     //     std::cout << "]\n";
+                //     // }
 
-                    // 这里假设 target_q 是从 Leader 端发来的 6 关节角（或者你自己约定的格式）
-                    if (target_q.size() >= 6)
-                    {
-                        for (int i = 0; i < 6; ++i)
-                        {
-                            // 从臂电机索引 6~11
-                            //添加负号，让主从臂对称运动
-                            controller()->motorPool()[i + 6].setTargetPos(target_q[i]);
-                        }
-                    }
-                }
+                //     // 这里假设 target_q 是从 Leader 端发来的 6 关节角（或者你自己约定的格式）
+                //     if (target_q.size() >= 6)
+                //     {
+                //         for (int i = 0; i < 6; ++i)
+                //         {
+                //             // 从臂电机索引 6~11
+                //             //添加负号，让主从臂对称运动
+                //             controller()->motorPool()[i + 6].setTargetPos(target_q[i]);
+                //         }
+                //     }
+                // }
 
 
 				if (count() % 100 == 0)
@@ -3431,6 +3449,38 @@ namespace robot
                 transform_force[4] = Tau_b[1] * imp_->gain_rot;
                 transform_force[5] = Tau_b[2] * imp_->gain_rot;
 
+                // ---- 零偏估计与消除（放在死区/饱和之前） ----
+                static double bias[6] = {0};
+                const double alpha = 0.005;  // 慢速学习，更稳定
+
+                // 使用末端速度判断"无人推动、基本静止"状态，用于更新零偏
+                const double v_th_lin = 0.01;  // 线速度阈值(m/s)
+                const double v_th_rot = 0.05;   // 角速度阈值(rad/s)
+
+                // 判断是否接近静止状态
+                bool near_static = 
+                    (std::abs(current_vel[0]) < v_th_lin &&
+                    std::abs(current_vel[1]) < v_th_lin &&
+                    std::abs(current_vel[2]) < v_th_lin &&
+                    std::abs(current_vel[3]) < v_th_rot &&
+                    std::abs(current_vel[4]) < v_th_rot &&
+                    std::abs(current_vel[5]) < v_th_rot);
+
+                // 仅在静止状态时更新零偏估计
+                if (near_static)
+                {
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        bias[i] = (1.0 - alpha) * bias[i] + alpha * transform_force[i];
+                    }
+                }
+
+                // 去除零偏后再进行后续的死区/饱和处理和导纳计算
+                for (int i = 0; i < 6; ++i)
+                {
+                    transform_force[i] -= bias[i];
+                }
+
                 if (count() % 500 == 0)
                 {
                     mout() 
@@ -3498,6 +3548,12 @@ namespace robot
                     dth[i] = imp_->v_c[i + 3] * dt;
                 }
 
+                // //--------添加速度衰减，消除力惨差导致的速度积分累计
+                // const double leak = 0.002;
+                // for(int i = 0 ; i<6 ; i++){
+                //     imp_->v_c[i]*=(1-leak);
+                // }
+
                 // 把小角度 dth 转成增量旋转矩阵，然后左乘当前姿态
                 double drm[9]{0};
                 double rm_c[9]{0};
@@ -3509,64 +3565,57 @@ namespace robot
                 aris::dynamic::s_rm2re(rm_target, current_pos + 3, "321"); // R_target -> 欧拉角，写回 current_pos[3..5]
 
                 // ----------------- 6. 速度 + 位置下发 -----------------
-                eeA2.setV(imp_->v_c);
-                if (model_a2.inverseKinematicsVel())
-                {
-                    mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                }
-                saMove(current_pos, model_a2, 1);
+                // eeA2.setV(imp_->v_c);
+                // if (model_a2.inverseKinematicsVel())
+                // {
+                //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                // }
+                // saMove(current_pos, model_a2, 1);
 
-                eeA1.setV(imp_->v_c);
-                if (model_a1.inverseKinematicsVel())
-                {
-                    mout() << "Error: inverseKinematicsVel failed" << std::endl;
-                }
+                // eeA1.setV(imp_->v_c);
+                // if (model_a1.inverseKinematicsVel())
+                // {
+                //     mout() << "Error: inverseKinematicsVel failed" << std::endl;
+                // }
 
                 if (g_tcp_server) 
-                {
-                    auto target_q = g_tcp_server->get_target_q();
-                    
-                    if (target_q.size() >= 6) 
+                {   
+                    mout() << "[DEBUG]m_fd进入tcp" << std::endl;
+                    for (int i =0 ; i<6 ; i++){
+                        imp_->target_q[i]= g_tcp_server->get_target_q()[i];
+                    }
+
+                    model_a1.setInputPos(imp_->target_q);
+
+                    if (model_a1.forwardDynamics())
                     {
-                        static double q_cmd[6] = {0};
-                        static bool inited = false;
-                        
-                        // 第一次执行时，用当前实际位置初始化
-                        if (!inited)
+                        throw std::runtime_error("Forward Kinematics Position Failed!");
+                    }
+
+
+                    double current_angle[6] = { 0 };
+
+                    for (int i = 0; i < 6; i++)
+                    {
+                        current_angle[i] = controller()->motorPool()[i].targetPos();
+                    }
+
+                    //通过move确定每次微小位移大小
+                    double move = 0.0001;
+                    for (int i = 0; i < 6; i++)
+                    {
+                        if (current_angle[i] <= imp_->target_q[i] - move)
                         {
-                            for (int i = 0; i < 6; i++)
-                            {
-                                q_cmd[i] = controller()->motorPool()[i].actualPos();
-                            }
-                            inited = true;
+                            controller()->motorPool()[i].setTargetPos(current_angle[i] + move);
                         }
-
-                        // 每周期最大步长限制（slew rate limit），防止30Hz网络数据造成的阶跃抖动
-                        const double dq_max[6] = {0.00005,0.00005,0.00005,0.00005,0.0005,0.005}; // 可根据实际情况调整这些值
-
-                        // 对每个关节进行限幅处理
-                        for (int i = 0; i < 6; i++)
+                        else if (current_angle[i] >= imp_->target_q[i] + move)
                         {
-                            // 计算期望位置与当前位置的误差
-                            double err = target_q[i] - q_cmd[i];
-                            
-                            // 对误差进行限幅，限制单周期最大变化量
-                            if (err > dq_max[i]) 
-                            {
-                                err = dq_max[i];
-                            }
-                            if (err < -dq_max[i]) 
-                            {
-                                err = -dq_max[i];
-                            }
-
-                            q_cmd[i] += err;
-                            
-                            // 设置电机目标位置
-                            controller()->motorPool()[i].setTargetPos(q_cmd[i]);
+                            controller()->motorPool()[i].setTargetPos(current_angle[i] - move);
                         }
                     }
-                }
+                }  
+                    
+            
 
                 // ----------------- 7. 将控制指令通过tcp发送出去 -----------------
                 // std::vector<double> current_q(13);
