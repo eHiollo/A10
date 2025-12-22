@@ -2910,20 +2910,20 @@ namespace robot
 		double v_c[6]{ 0 };
 
 		//Impedence Parameter
-        // 拖动示教：K=0（不回位），B适中（阻尼），M较大（稳定）
-		double K[6]{ 0, 0, 0, 0, 0, 0 };  // 拖动示教不需要位置反馈
+        // 拖动示教：高阻尼防震荡
+		double K[6]{ 0, 0, 0, 0, 0, 0 };
         
-        // 阻尼：提供平滑停止
-        double B[6]{ 80, 80, 80, 2, 2, 2 };
+        // 阻尼：大幅增加，防止震荡
+        double B[6]{ 300, 300, 300, 8, 8, 8 };
         
-        // 惯性：较大值增加稳定性，降低响应速度
-        double M[6]{ 8, 8, 8, 1.0, 1.0, 1.0 };
+        // 惯性：增大，降低响应速度
+        double M[6]{ 15, 15, 15, 2.0, 2.0, 2.0 };
 
 		double Ke[6]{ 220000,220000,220000,220000,220000,220000 };
 
-        // 力增益：适当降低，避免过度放大噪声
-        double gain_trans = 2.5;
-        double gain_rot = 3.0;
+        // 力增益：降低，减少噪声放大
+        double gain_trans = 1.5;
+        double gain_rot = 2.0;
 
         //Parameters For Compensating rz
         // double a_y = -0.0592;
@@ -2940,8 +2940,8 @@ namespace robot
 		//Switch Model
 		int m_;
 
-        //Force Buffer
-        std::array<double, 10> force_buffer[6] = {};
+        //Force Buffer - 增大窗口减少噪声
+        std::array<double, 30> force_buffer[6] = {};
         int buffer_index[6]{ 0 };
 	};
 	auto ForceDrag::prepareNrt() -> void
@@ -3130,9 +3130,9 @@ namespace robot
             for (int i = 0; i < 6; i++)
             {
                 imp_->force_buffer[i][imp_->buffer_index[i]] = actual_force_[i];
-                imp_->buffer_index[i] = (imp_->buffer_index[i] + 1) % 10;
+                imp_->buffer_index[i] = (imp_->buffer_index[i] + 1) % 30;
 
-                filtered_force_[i] = std::accumulate(imp_->force_buffer[i].begin(), imp_->force_buffer[i].end(), 0.0) / 10;
+                filtered_force_[i] = std::accumulate(imp_->force_buffer[i].begin(), imp_->force_buffer[i].end(), 0.0) / 30.0;
             }
         };
 
