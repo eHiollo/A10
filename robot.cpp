@@ -2910,21 +2910,20 @@ namespace robot
 		double v_c[6]{ 0 };
 
 		//Impedence Parameter
-		double K[6]{ 100,100,100,15,15,15 };
-//        double B[6]{ 300,300,300,15,15,15 };
-//        double M[6]{ 3,3,3,10,10,10 };
-
-        //1000  10    80
-        // double B[6]{ 800,800,800,15,15,15 };
-        // double M[6]{ 5,5,5,10,5,5 };
-
-        double B[6]{ 200,200,200,5,5,5 };
-        double M[6]{ 5,5,5,0.3,0.3,0.3 };
+        // 拖动示教：K=0（不回位），B适中（阻尼），M较大（稳定）
+		double K[6]{ 0, 0, 0, 0, 0, 0 };  // 拖动示教不需要位置反馈
+        
+        // 阻尼：提供平滑停止
+        double B[6]{ 80, 80, 80, 2, 2, 2 };
+        
+        // 惯性：较大值增加稳定性，降低响应速度
+        double M[6]{ 8, 8, 8, 1.0, 1.0, 1.0 };
 
 		double Ke[6]{ 220000,220000,220000,220000,220000,220000 };
 
-        double gain_trans = 4.2;
-        double gain_rot = 5.0;
+        // 力增益：适当降低，避免过度放大噪声
+        double gain_trans = 2.5;
+        double gain_rot = 3.0;
 
         //Parameters For Compensating rz
         // double a_y = -0.0592;
@@ -3487,72 +3486,23 @@ namespace robot
                 transform_force[4] = Tau_b[1] * imp_->gain_rot;
                 transform_force[5] = Tau_b[2] * imp_->gain_rot;
 
-                // ----------------- 3.5 零偏估计与消除（在死区前） -----------------
+                // ----------------- 3.5 零偏估计（仅初始阶段，之后固定） -----------------
                 static double bias[6] = {0};
                 static int bias_init_count = 0;
-                const double alpha_fast = 0.02;   // 初始快速学习
-                const double alpha_slow = 0.002;  // 后续慢速学习
-                const double v_th_lin = 0.01;     // m/s
-                const double v_th_rot = 0.05;     // rad/s
-                const int bias_init_samples = 500; // 初始采样次数
-
-                bool near_static =
-                    (std::abs(current_vel[0]) < v_th_lin &&
-                    std::abs(current_vel[1]) < v_th_lin &&
-                    std::abs(current_vel[2]) < v_th_lin &&
-                    std::abs(current_vel[3]) < v_th_rot &&
-                    std::abs(current_vel[4]) < v_th_rot &&
-                    std::abs(current_vel[5]) < v_th_rot);
-
-                if (near_static)
+                const int bias_init_samples = 200;  // 仅前200个周期估计零偏
+                
+                // 仅在初始阶段估计零偏，之后固定不变
+                if (bias_init_count < bias_init_samples)
                 {
-                    double alpha = (bias_init_count < bias_init_samples) ? alpha_fast : alpha_slow;
+                    const double alpha = 0.05;  // 较快学习
                     for (int i = 0; i < 6; ++i)
                         bias[i] = (1.0 - alpha) * bias[i] + alpha * transform_force[i];
-                    
-                    if (bias_init_count < bias_init_samples)
-                        bias_init_count++;
+                    bias_init_count++;
                 }
-
+                
+                // 应用零偏补偿
                 for (int i = 0; i < 6; ++i)
                     transform_force[i] -= bias[i];
-
-                // ----------------- 3.6 防漂：无外力时清零速度 + 泄漏 -----------------
-                // 增强的防漂机制
-                bool no_force = true;
-                const double nf_lin = 0.25;   // N（降低阈值，更敏感）
-                const double nf_rot = 0.02;   // Nm
-                for (int i = 0; i < 3; ++i) if (std::abs(transform_force[i])   > nf_lin) no_force = false;
-                for (int i = 3; i < 6; ++i) if (std::abs(transform_force[i])   > nf_rot) no_force = false;
-
-                if (no_force && near_static)
-                {
-                    // 无接触 + 静止：清零速度，并更新期望位置为当前位置（防止位置漂移）
-                    for (int i = 0; i < 6; ++i)
-                    {
-                        imp_->v_c[i] = 0.0;
-                        if (i < 3)
-                            imp_->arm2_x_d[i] = current_pos[i];  // 更新期望位置
-                    }
-                    // 更新期望姿态
-                    std::copy(current_pos + 3, current_pos + 6, imp_->arm2_x_d + 3);
-                }
-
-                // 增强的泄漏（防止残余偏差积分累计）
-                const double leak_lin = 0.015;  // 线速度泄漏（增强）
-                const double leak_rot = 0.025;   // 角速度泄漏（增强）
-                for (int i = 0; i < 3; ++i)
-                {
-                    imp_->v_c[i] *= (1.0 - leak_lin);
-                    // 如果速度很小，直接清零
-                    if (std::abs(imp_->v_c[i]) < 0.001) imp_->v_c[i] = 0.0;
-                }
-                for (int i = 3; i < 6; ++i)
-                {
-                    imp_->v_c[i] *= (1.0 - leak_rot);
-                    // 如果角速度很小，直接清零
-                    if (std::abs(imp_->v_c[i]) < 0.0005) imp_->v_c[i] = 0.0;
-                }
 
                 // if (count() % 500 == 0)
                 // {
@@ -3562,9 +3512,9 @@ namespace robot
                 // }
 
                 // ----------------- 4. 死区 + 饱和 -----------------
-                // 降低死区阈值，提高灵敏度，但保持稳定性
-                double trigger_force[6]{ 1.2, 1.2, 1.5, 0.3, 0.3, 0.3 }; // 降低死区，提高响应
-                double max_force[6]{ 40, 40, 40, 6, 6, 6 };
+                // PL=0时，需要更大的死区来过滤重力影响（约3N）
+                double trigger_force[6]{ 3.5, 3.5, 4.0, 0.25, 0.25, 0.25 };
+                double max_force[6]{ 30, 30, 30, 4, 4, 4 };  // 限制最大力，避免过激响应
 
                 for (int i = 0; i < 6; ++i)
                 {
@@ -3575,23 +3525,18 @@ namespace robot
                     if (transform_force[i] < -max_force[i]) transform_force[i] = -max_force[i];
                 }
 
-                // ----------------- 5. 6 维导纳（3 平移 + 3 转动，带位置反馈） -----------------
+                // ----------------- 5. 6 维导纳控制（拖动示教，K=0） -----------------
                 double acc[3]{0};
                 double ome[3]{0};
                 double dx[3]{0};
                 double dth[3]{0};
                 const double dt = 0.002;
 
-                // 5.1 平移（添加位置反馈项K，防止漂移）
+                // 5.1 平移：简化的导纳控制 acc = (F - B*v) / M
                 for (int i = 0; i < 3; ++i)
                 {
-                    // 导纳控制：acc = (F_ext - F_d - B*(v-v_d) - K*(x-x_d)) / M
-                    // 添加位置反馈项K，当位置偏离期望位置时产生恢复力
-                    acc[i] = (-imp_->f_d[i]
-                            + transform_force[i]
-                            - imp_->B[i] * (imp_->v_c[i] - imp_->v_d[i])
-                            - imp_->K[i] * (current_pos[i] - imp_->arm2_x_d[i]))
-                            / imp_->M[i];
+                    // 拖动示教：无位置反馈（K=0），只有阻尼
+                    acc[i] = (transform_force[i] - imp_->B[i] * imp_->v_c[i]) / imp_->M[i];
 
                     if (!std::isfinite(acc[i]))
                     {
@@ -3603,41 +3548,27 @@ namespace robot
                 for (int i = 0; i < 3; ++i)
                 {
                     imp_->v_c[i] += acc[i] * dt;
-                    // 限制速度，防止过大
-                    const double max_v = 0.3;  // m/s
+                    
+                    // 限制速度
+                    const double max_v = 0.15;  // m/s，降低最大速度
                     if (std::abs(imp_->v_c[i]) > max_v)
                         imp_->v_c[i] = (imp_->v_c[i] > 0 ? max_v : -max_v);
                     
-                    dx[i] = imp_->v_c[i] * dt + 0.5 * acc[i] * dt * dt;
+                    // 小速度清零（防止漂移）
+                    if (std::abs(imp_->v_c[i]) < 0.001)
+                        imp_->v_c[i] = 0.0;
+                    
+                    dx[i] = imp_->v_c[i] * dt;
                     current_pos[i] += dx[i];
                 }
 
-                // 5.2 旋转（添加位置反馈项K，防止姿态漂移）
-                // 计算姿态误差（使用旋转矩阵方法，与m==0分支一致）
-                double pose_error[3]{0};
-                double rm_d[9]{0};
-                double inv_rm_d[9]{0};
+                // 5.2 旋转：简化的导纳控制
                 double rm_c[9]{0};
-                double rm_e[9]{0};
-                
-                // 期望姿态的旋转矩阵
-                aris::dynamic::s_re2rm(imp_->arm2_x_d + 3, rm_d, "321");
-                // 当前姿态的旋转矩阵
-                aris::dynamic::s_re2rm(current_pos + 3, rm_c, "321");
-                // 计算相对旋转误差：rm_e = rm_c * inv(rm_d)
-                gc.getInverseRm(rm_d, inv_rm_d);
-                aris::dynamic::s_mm(3, 3, 3, rm_c, inv_rm_d, rm_e);
-                // 从旋转矩阵提取轴角误差
-                aris::dynamic::s_rm2ra(rm_e, pose_error);
                 
                 for (int i = 0; i < 3; ++i)
                 {
-                    // 添加姿态反馈项
-                    ome[i] = (-imp_->f_d[i + 3]
-                            + transform_force[i + 3]
-                            - imp_->B[i + 3] * (imp_->v_c[i + 3] - imp_->v_d[i + 3])
-                            - imp_->K[i + 3] * pose_error[i])
-                            / imp_->M[i + 3];
+                    // 拖动示教：无姿态反馈（K=0），只有阻尼
+                    ome[i] = (transform_force[i + 3] - imp_->B[i + 3] * imp_->v_c[i + 3]) / imp_->M[i + 3];
 
                     if (!std::isfinite(ome[i]))
                     {
@@ -3649,12 +3580,21 @@ namespace robot
                 for (int i = 0; i < 3; ++i)
                 {
                     imp_->v_c[i + 3] += ome[i] * dt;
+                    
+                    // 限制角速度
+                    const double max_omega = 0.3;  // rad/s
+                    if (std::abs(imp_->v_c[i + 3]) > max_omega)
+                        imp_->v_c[i + 3] = (imp_->v_c[i + 3] > 0 ? max_omega : -max_omega);
+                    
+                    // 小角速度清零（防止漂移）
+                    if (std::abs(imp_->v_c[i + 3]) < 0.001)
+                        imp_->v_c[i + 3] = 0.0;
+                    
                     dth[i] = imp_->v_c[i + 3] * dt;
                 }
 
                 // 小角度 dth -> 增量旋转矩阵，再左乘当前姿态
                 double drm[9]{0};
-                double rm_c[9]{0};
                 double rm_target[9]{0};
 
                 aris::dynamic::s_ra2rm(dth, drm);
