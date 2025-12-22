@@ -211,7 +211,7 @@ std::vector<uint8_t> BusServo::send_packet_(uint8_t id, uint8_t instruction,
   pkt.insert(pkt.end(), params.begin(), params.end());
   pkt.push_back(checksum);
 
-  log_hex_("TX", pkt);
+  //log_hex_("TX", pkt);
   serial_.resetInputBuffer();
   serial_.writeAll(pkt);
   return pkt;
@@ -406,13 +406,13 @@ double BusServo::inverse_interpolate_mm_(int servo_pos,
 }
 
 // 读取舵机当前开口（mm）
-std::optional<double> BusServo::get_position_mm(uint8_t servo_id,
+double BusServo::get_position_mm(uint8_t servo_id,
                                                 const std::string& gripper_type) {
   auto it = gripper_calib_.find(gripper_type);
-  if (it == gripper_calib_.end()) return std::nullopt;
+  if (it == gripper_calib_.end()) return 0;
 
   auto s = read_sensor_data(servo_id);
-  if (!s) return std::nullopt;
+  if (!s) return 0;
 
   int pos = s->position; // 原始回读
   // 有些舵机可能返回负数或超过范围，你可 clamp 一下
@@ -481,6 +481,7 @@ uint8_t BusServo::get_position(uint8_t servo_id)
  {
   return 0;
 }
+
 
 // ===================== main (test) =====================
 // int main(int argc, char** argv) {

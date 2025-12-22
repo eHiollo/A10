@@ -57,6 +57,7 @@ public:
 
   // 你现有接口：返回值你之后可以改成“原始位置/百分比/mm”，先保留
   uint8_t get_position(uint8_t servo_id);
+  double get_position_mm(uint8_t servo_id,const std::string& gripper_type);
 
   std::optional<std::vector<uint8_t>> read_data(uint8_t servo_id, uint8_t address, uint8_t length);
   std::pair<std::vector<uint8_t>, uint8_t> write_data(uint8_t servo_id, uint8_t address, const std::vector<uint8_t>& values);
@@ -86,6 +87,7 @@ private:
   Resp receive_packet_();
 
   int interpolate_(double value, const std::vector<std::pair<double, int>>& table);
+  double inverse_interpolate_mm_(int servo_pos,const std::vector<std::pair<double, int>>& table);
   void init_calibration_();
 
 private:

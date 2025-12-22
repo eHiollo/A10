@@ -74,23 +74,23 @@ int main(int argc, char *argv[]){
     }
     
     //创建舵机实例
-    // BusServo gripper("/dev/ttyUSB0", 1000000, 150, true);
+    BusServo gripper("/dev/ttyUSB0", 1000000, 150, true);
     
-    // if (gripper.ping(10) == 0) {
-    //     gripper.set_gripper_openclose(10,"100mm",1,800);
-    //     // sleep(5000);
-    //     std::cout <<"---------Gripper Connected----------" << std::endl;
-    //     g_gripper = &gripper;
-    // } else {
-    //     std::cerr <<"Faild to start gripper " << std::endl;
-    // }
+    if (gripper.ping(10) == 0) {
+        gripper.set_gripper_openclose(10,"100mm",1,800);
+        // sleep(5000);
+        std::cout <<"---------Gripper Connected----------" << std::endl;
+        g_gripper = &gripper;
+    } else {
+        std::cerr <<"Faild to start gripper " << std::endl;
+    }
     
 
     //新开一个进程，持续更新机器人信息
     std::thread state_update_thread([&](){
         while (true)
         {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
 
         std::vector<double> current_q(13);
 
@@ -98,7 +98,8 @@ int main(int argc, char *argv[]){
             current_q[i] = cs.controller().motorPool()[i].actualPos();
         } 
         //获取舵机数据并存在第13维，也就是current_q[12]
-        current_q[12] = g_gripper->get_position(10);
+        current_q[12] = g_gripper->get_position_mm(10,"100mm");
+        // std::cout<<"家抓信息："<<current_q[12]<<std::endl;
 
         tcp_server.send_set_joints(current_q);
         }

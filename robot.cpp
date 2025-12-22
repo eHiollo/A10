@@ -2878,6 +2878,10 @@ namespace robot
 		bool init = false;
 		bool contact_check = false;
 
+        //舵机控制
+        bool gripper_flag =false;
+        double gripper_last_state =1;
+
 		//Force Compensation Parameter
 		double comp_f[6]{ 0 };
 
@@ -3215,10 +3219,6 @@ namespace robot
                         }
 
                         if (std::abs(force_checker[i]) > 3.0) {
-                            mout() << "[CONTACT] i=" << i
-                                << " raw=" << raw_force_checker[i]
-                                << " comp=" << comp_force_checker[i]
-                                << " sum=" << force_checker[i] << std::endl;
                             imp_->contact_check = true;
                             break;
                         }
@@ -3515,12 +3515,12 @@ namespace robot
                 for (int i = 0; i < 3; ++i) imp_->v_c[i] *= (1.0 - leak_lin);
                 for (int i = 3; i < 6; ++i) imp_->v_c[i] *= (1.0 - leak_rot);
 
-                if (count() % 500 == 0)
-                {
-                    mout() << "Force_b:\t"
-                        << transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] << '\t'
-                        << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] << std::endl;
-                }
+                // if (count() % 500 == 0)
+                // {
+                //     mout() << "Force_b:\t"
+                //         << transform_force[0] << '\t' << transform_force[1] << '\t' << transform_force[2] << '\t'
+                //         << transform_force[3] << '\t' << transform_force[4] << '\t' << transform_force[5] << std::endl;
+                // }
 
                 // ----------------- 4. 死区 + 饱和 -----------------
                 double trigger_force[6]{ 2, 2, 2.0, 0.5, 0.5, 0.5 }; // z 稍大点不敏感，先稳住漂移
@@ -3609,52 +3609,105 @@ namespace robot
 
                 // ----------------- 6. 下发控制（你现在用 TCP 控 follower） -----------------
                 // ----------------- follower via TCP (30Hz target, 500Hz smooth) -----------------
-                static double q_ref[6]{0};   // TCP更新的目标参考（低频）
-                static double q_cmd[6]{0};   // 500Hz内部平滑后的指令
-                static bool q_inited = false;
 
                 if (g_tcp_server)
-                {
+                {   
                     // 1) 读取一次TCP目标（可能30Hz更新，但我们500Hz都读也没事）
                     auto target = g_tcp_server->get_target_q();
-                    if (target.size() >= 6)
+                    //--------follower arm 控制方法1，正规控制-------
+                    // static double q_ref[6]{0};   // TCP更新的目标参考（低频）
+                    // double move[6] = {0.00009, 0.00009, 0.00008, 0.00012, 0.00012, 0.00011};
+
+                    // // 1) 读取一次TCP目标（可能30Hz更新，但我们500Hz都读也没事）
+                    // auto target = g_tcp_server->get_target_q();
+
+                    // // 2) 取数据
+                    // if (target.size() >= 6)
+                    // {
+                    //     // 只在数据有效时更新参考
+                    //     for (int i = 0; i < 6; ++i) q_ref[i] = target[i];
+
+                    //     //if (count() % 500 == 0) mout() << "[DEBUG] m_fd tcp ok" << std::endl;
+                    // }
+                    // else
+                    // {
+                    //     if (count() % 500 == 0) mout() << "[WARN] tcp target_q size < 6, hold last ref" << std::endl;
+                    //     // size不够就保持上一次 q_ref，不要动
+                    // }
+
+                    // model_a1.setInputPos(q_ref);
+
+                    // if (model_a1.forwardKinematics())
+                    // {
+                    //     throw std::runtime_error("Forward Kinematics Position Failed!");
+                    // }
+
+                    // double current_angle[6] = { 0 };
+
+                    // for (int i = 0; i < 6; i++)
+                    // {
+                    //      current_angle[i] = controller()->motorPool()[i].targetPos();
+                    // }
+
+                    // for (int i = 0; i < 6; i++)
+                    // {
+                    //     if (current_angle[i] <= q_ref[i] - move[i])
+                    //     {
+                    //         controller()->motorPool()[i].setTargetPos(current_angle[i] + move[i]);
+                    //     }
+                    //     else if (current_angle[i] >= q_ref[i] + move[i])
+                    //     {
+                    //         controller()->motorPool()[i].setTargetPos(current_angle[i] - move[i]);
+                    //     }
+                    //     else
+                    //     {
+                    //         controller()->motorPool()[i].setTargetPos(q_ref[i]);
+                    //     }
+                    // }
+                    //--------follower arm 控制方法12，不正规控制，直接在Aris内部控制-------
+                    eeA1.setV(imp_->v_c);
+
+                    if (model_a1.inverseKinematicsVel())
                     {
-                        // 只在数据有效时更新参考
-                        for (int i = 0; i < 6; ++i) q_ref[i] = target[i];
-
-                        //if (count() % 500 == 0) mout() << "[DEBUG] m_fd tcp ok" << std::endl;
+                        mout() << "[ERROR] inverseKinematicsVel failed (arm2)" << std::endl;
                     }
-                    else
+                    
+                    model_a2.setOutputPos(current_pos);
+                    double x_joints[6]{0};
+                    model_a2.getInputPos(x_joints);
+                    for (int i=0; i<6;i++){
+                        controller()->motorPool()[i].setTargetPos(x_joints[i]);
+                    }
+
+
+                    //--------舵机控制----------
+                    double gripper_state =target[6];
+                    if(count()%500==0){
+                        std::cout<<"gripper_tcp:"<<gripper_state<<std::endl;
+                    }
+
+                    if(gripper_state != imp_->gripper_last_state)
                     {
-                        if (count() % 500 == 0) mout() << "[WARN] tcp target_q size < 6, hold last ref" << std::endl;
-                        // size不够就保持上一次 q_ref，不要动
+                        imp_->gripper_flag = true;
+                        imp_->gripper_last_state = gripper_state;
+                    }
+                    if(imp_->gripper_flag){
+                        if(gripper_state==1){
+                        g_gripper->set_gripper_openclose(10,"100mm", 1, 800);
+                        } else{
+                        g_gripper->set_gripper_openclose(10,"100mm", 0, 800);    
+                        } 
+                        imp_->gripper_flag = false;
                     }
 
-                    for (int i = 0; i < 6; ++i)
-                        q_cmd[i] = controller()->motorPool()[i].actualPos();
-                    }
-
-                    // 3) 500Hz 限速追踪：q_ref -> q_cmd -> motor target
-                    // 每周期最大步长（slew-rate limit），专治 30Hz 阶跃抖动
-                    const double dq_max[6] = {0.002, 0.002, 0.002, 0.004, 0.004, 0.004}; // 你按实际再调
-
-                    for (int i = 0; i < 6; ++i)
-                    {
-                        double err = q_ref[i] - q_cmd[i];
-
-                        if (err >  dq_max[i]) err =  dq_max[i];
-                        if (err < -dq_max[i]) err = -dq_max[i];
-
-                        q_cmd[i] += err;
-                        controller()->motorPool()[i].setTargetPos(q_cmd[i]);
-                    }
                 }
                 else
                 {
                     // TCP断开时：建议保持当前，不要乱跑（可选）
                     // if (count() % 500 == 0) mout() << "[WARN] g_tcp_server null" << std::endl;
                 }
-
+            }
+        }
 
                 // ✅ 分支结束：返回剩余周期
                 return 30000 - count();
