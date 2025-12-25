@@ -3360,7 +3360,7 @@ namespace robot
 				}
 
 			}
-            // ======= ForceDrag: m == 1 branch (FULL, drop-in) =======
+            // ======= ForceDrag: m == 1 branch (测试模式：自动运动+打印力数据) =======
             else if (imp_->m_ == 1)
             {
                 // ----------------- 0. 安全：关键指针 / NaN 检查 -----------------
@@ -3376,14 +3376,31 @@ namespace robot
                 eeA2.getV(current_vel);          // ee cartesian velocity
                 eeA2.getMpm(current_pm);         // base_T_ee 4x4 pm
                 
-                // 首次进入时，初始化期望位置为当前位置
+                // 首次进入时，记录初始位置用于自动运动
+                static double start_pos[6]{0};
                 static bool first_run = true;
                 if (first_run)
                 {
+                    std::copy(current_pos, current_pos + 6, start_pos);
                     std::copy(current_pos, current_pos + 6, imp_->arm2_x_d);
                     first_run = false;
-                    mout() << "[INFO] Initialize arm2_x_d to current position" << std::endl;
+                    mout() << "[TEST MODE] Arm2 will move automatically to test gravity compensation" << std::endl;
+                    mout() << "[TEST MODE] Watching: sensor_force, comp_force, actual_force (should be ~0 if comp is correct)" << std::endl;
                 }
+
+                // ----------------- 测试：自动运动（缓慢正弦摆动） -----------------
+                double t = count() * 0.001;  // 时间(秒)
+                double amplitude = 0.3;      // 姿态振幅(rad)
+                double freq = 0.2;           // 频率(Hz)
+                
+                // 目标位置：保持xyz不变，让姿态缓慢变化
+                double target_pos[6];
+                target_pos[0] = start_pos[0];
+                target_pos[1] = start_pos[1];
+                target_pos[2] = start_pos[2];
+                target_pos[3] = start_pos[3] + amplitude * std::sin(2 * PI * freq * t);      // rx 摆动
+                target_pos[4] = start_pos[4] + amplitude * std::sin(2 * PI * freq * t + 1);  // ry 摆动（相位差）
+                target_pos[5] = start_pos[5];  // rz 不动
 
                 // 从 current_pm 里取出 R_be (base <- ee 的旋转矩阵, 用于 ee->base: F_b = R_be * F_e)
                 double rm_be[9];
@@ -3400,7 +3417,6 @@ namespace robot
                 getForceData(current_force, 1, imp_->init);
                 gc.getCompFT(current_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force);
 
-
                 for (int i = 0; i < 6; ++i)
                 {
                     actual_force[i] = comp_force[i] + current_force[i];
@@ -3413,23 +3429,27 @@ namespace robot
                     }
                 }
 
-                if (count() % 50 == 0)
+                // ----------------- 打印详细力数据（每100ms一次） -----------------
+                if (count() % 100 == 0)
                 {
-                    lout() << "raw\t"
-                        << current_force[0] + imp_->arm2_init_force[0] << '\t'
-                        << current_force[1] + imp_->arm2_init_force[1] << '\t'
-                        << current_force[2] + imp_->arm2_init_force[2] << '\t'
-                        << current_force[3] + imp_->arm2_init_force[3] << '\t'
-                        << current_force[4] + imp_->arm2_init_force[4] << '\t'
-                        << current_force[5] + imp_->arm2_init_force[5] << '\t'
-                        << "comp+raw\t"
-                        << actual_force[0] << '\t'
-                        << actual_force[1] << '\t'
-                        << actual_force[2] << '\t'
-                        << actual_force[3] << '\t'
-                        << actual_force[4] << '\t'
-                        << actual_force[5] << std::endl;
+                    mout() << "======== Force Test [t=" << t << "s] ========" << std::endl;
+                    mout() << "Pose(rx,ry,rz): " << current_pos[3] << ", " << current_pos[4] << ", " << current_pos[5] << std::endl;
+                    mout() << "Sensor(raw):    " 
+                           << current_force[0] << ", " << current_force[1] << ", " << current_force[2] << " | "
+                           << current_force[3] << ", " << current_force[4] << ", " << current_force[5] << std::endl;
+                    mout() << "Comp(gravity):  " 
+                           << comp_force[0] << ", " << comp_force[1] << ", " << comp_force[2] << " | "
+                           << comp_force[3] << ", " << comp_force[4] << ", " << comp_force[5] << std::endl;
+                    mout() << "Actual(contact):" 
+                           << actual_force[0] << ", " << actual_force[1] << ", " << actual_force[2] << " | "
+                           << actual_force[3] << ", " << actual_force[4] << ", " << actual_force[5] << std::endl;
+                    mout() << ">>> If comp is correct, Actual should be close to 0 <<<" << std::endl;
                 }
+                
+                // ----------------- 执行自动运动 -----------------
+                saMove(target_pos, model_a2, 1);
+                
+                return 30000 - count();
 
                 // 滤波（在 EE/传感器系）
                 forceFilter(actual_force, filtered_force);
