@@ -1623,17 +1623,17 @@ namespace robot
 			}
 			else if (imp_->target1_reached && imp_->target2_reached && imp_->target3_reached && imp_->target4_reached)
 			{
-				//Arm 1
+				// ========== Arm 1 标定 ==========
 				double arm1_t_vector[9]{ 0 };
 				double arm1_f_vector[9]{ 0 };
-
-				double arm1_f_matrix[54]{ 0 };
 				double arm1_r_matrix[54]{ 0 };
-
 
 				double arm1_ee_rm_1[9]{ 0 };
 				double arm1_ee_rm_2[9]{ 0 };
 				double arm1_ee_rm_3[9]{ 0 };
+				double arm1_ee_rm_1_inv[9]{ 0 };
+				double arm1_ee_rm_2_inv[9]{ 0 };
+				double arm1_ee_rm_3_inv[9]{ 0 };
 
 				double arm1_current_force[6]{ 0 };
 
@@ -1641,41 +1641,50 @@ namespace robot
 				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_2, arm1_ee_rm_2);
 				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_3, arm1_ee_rm_3);
 
+				// 获取旋转矩阵的逆 (R^T)
+				gc.getInverseRm(arm1_ee_rm_1, arm1_ee_rm_1_inv);
+				gc.getInverseRm(arm1_ee_rm_2, arm1_ee_rm_2_inv);
+				gc.getInverseRm(arm1_ee_rm_3, arm1_ee_rm_3_inv);
 
-
-				gc.getTorqueVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_t_vector);
+				// Step 1: 先求 L 向量 (力方程)
 				gc.getForceVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_f_vector);
-
-				gc.getFMatrix(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_f_matrix);
 				gc.getRMatrix(arm1_ee_rm_1, arm1_ee_rm_2, arm1_ee_rm_3, arm1_r_matrix);
-
-				gc.getPLMatrix(arm1_f_matrix, arm1_t_vector, imp_->arm1_p_vector);
 				gc.getPLMatrix(arm1_r_matrix, arm1_f_vector, imp_->arm1_l_vector);
 
+				// Step 2: 用 L 向量计算每个姿态下的真实重力 G = R^{-1} × L[0:3]
+				double arm1_L_vec[3] = { imp_->arm1_l_vector[0], imp_->arm1_l_vector[1], imp_->arm1_l_vector[2] };
+				double arm1_G1[3]{ 0 }, arm1_G2[3]{ 0 }, arm1_G3[3]{ 0 };
+				aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_1_inv, arm1_L_vec, arm1_G1);
+				aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_2_inv, arm1_L_vec, arm1_G2);
+				aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_3_inv, arm1_L_vec, arm1_G3);
+
+				// Step 3: 用真实重力（而非传感器读数）构造 F 矩阵，求 P 向量
+				double arm1_true_force_1[6] = { arm1_G1[0], arm1_G1[1], arm1_G1[2], 0, 0, 0 };
+				double arm1_true_force_2[6] = { arm1_G2[0], arm1_G2[1], arm1_G2[2], 0, 0, 0 };
+				double arm1_true_force_3[6] = { arm1_G3[0], arm1_G3[1], arm1_G3[2], 0, 0, 0 };
+
+				double arm1_f_matrix[54]{ 0 };
+				gc.getTorqueVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_t_vector);
+				gc.getFMatrix(arm1_true_force_1, arm1_true_force_2, arm1_true_force_3, arm1_f_matrix);
+				gc.getPLMatrix(arm1_f_matrix, arm1_t_vector, imp_->arm1_p_vector);
+
 				double arm1_current_ee_pm[16]{ 0 };
-                double arm1_compf[6]{0};
-
-
-                eeA1.getMpm(arm1_current_ee_pm);
-
-
-
-                gc.getCompFT(arm1_current_ee_pm, imp_->arm1_l_vector, imp_->arm1_p_vector, arm1_compf);
-
+				double arm1_compf[6]{ 0 };
+				eeA1.getMpm(arm1_current_ee_pm);
+				gc.getCompFT(arm1_current_ee_pm, imp_->arm1_l_vector, imp_->arm1_p_vector, arm1_compf);
 				getForceData(arm1_current_force, 0, imp_->init);
 
-
-				//Arm 2
+				// ========== Arm 2 标定 ==========
 				double arm2_t_vector[9]{ 0 };
 				double arm2_f_vector[9]{ 0 };
-
-				double arm2_f_matrix[54]{ 0 };
 				double arm2_r_matrix[54]{ 0 };
-
 
 				double arm2_ee_rm_1[9]{ 0 };
 				double arm2_ee_rm_2[9]{ 0 };
 				double arm2_ee_rm_3[9]{ 0 };
+				double arm2_ee_rm_1_inv[9]{ 0 };
+				double arm2_ee_rm_2_inv[9]{ 0 };
+				double arm2_ee_rm_3_inv[9]{ 0 };
 
 				double arm2_current_force[6]{ 0 };
 
@@ -1683,16 +1692,31 @@ namespace robot
 				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_2, arm2_ee_rm_2);
 				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_3, arm2_ee_rm_3);
 
+				gc.getInverseRm(arm2_ee_rm_1, arm2_ee_rm_1_inv);
+				gc.getInverseRm(arm2_ee_rm_2, arm2_ee_rm_2_inv);
+				gc.getInverseRm(arm2_ee_rm_3, arm2_ee_rm_3_inv);
 
-
-				gc.getTorqueVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_t_vector);
+				// Step 1: 先求 L 向量
 				gc.getForceVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_f_vector);
-
-				gc.getFMatrix(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_f_matrix);
 				gc.getRMatrix(arm2_ee_rm_1, arm2_ee_rm_2, arm2_ee_rm_3, arm2_r_matrix);
-
-				gc.getPLMatrix(arm2_f_matrix, arm2_t_vector, imp_->arm2_p_vector);
 				gc.getPLMatrix(arm2_r_matrix, arm2_f_vector, imp_->arm2_l_vector);
+
+				// Step 2: 计算真实重力
+				double arm2_L_vec[3] = { imp_->arm2_l_vector[0], imp_->arm2_l_vector[1], imp_->arm2_l_vector[2] };
+				double arm2_G1[3]{ 0 }, arm2_G2[3]{ 0 }, arm2_G3[3]{ 0 };
+				aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_1_inv, arm2_L_vec, arm2_G1);
+				aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_2_inv, arm2_L_vec, arm2_G2);
+				aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_3_inv, arm2_L_vec, arm2_G3);
+
+				// Step 3: 用真实重力构造 F 矩阵，求 P 向量
+				double arm2_true_force_1[6] = { arm2_G1[0], arm2_G1[1], arm2_G1[2], 0, 0, 0 };
+				double arm2_true_force_2[6] = { arm2_G2[0], arm2_G2[1], arm2_G2[2], 0, 0, 0 };
+				double arm2_true_force_3[6] = { arm2_G3[0], arm2_G3[1], arm2_G3[2], 0, 0, 0 };
+
+				double arm2_f_matrix[54]{ 0 };
+				gc.getTorqueVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_t_vector);
+				gc.getFMatrix(arm2_true_force_1, arm2_true_force_2, arm2_true_force_3, arm2_f_matrix);
+				gc.getPLMatrix(arm2_f_matrix, arm2_t_vector, imp_->arm2_p_vector);
 
 				double arm2_current_ee_pm[16]{ 0 };
                 double arm2_compf[6]{0};
