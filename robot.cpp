@@ -1165,6 +1165,8 @@ namespace robot
 		bool target2_reached = false;
 		bool target3_reached = false;
 		bool target4_reached = false;
+		bool target5_reached = false;
+		bool target6_reached = false;  // 回到初始位置
 
 		bool init = false;
 
@@ -1177,6 +1179,8 @@ namespace robot
 
 		//temp data to stroage 10 times of actual force
 
+		// 姿态数量
+		static constexpr int NUM_POSES = 5;
 
 		// For Arm 1
 		double arm1_p_vector[6]{ 0 };
@@ -1185,14 +1189,20 @@ namespace robot
 		double arm1_temp_force_1[6] = { 0 };
 		double arm1_temp_force_2[6] = { 0 };
 		double arm1_temp_force_3[6] = { 0 };
+		double arm1_temp_force_4[6] = { 0 };
+		double arm1_temp_force_5[6] = { 0 };
 
 		double arm1_force_data_1[6] = { 0 };
 		double arm1_force_data_2[6] = { 0 };
 		double arm1_force_data_3[6] = { 0 };
+		double arm1_force_data_4[6] = { 0 };
+		double arm1_force_data_5[6] = { 0 };
 
 		double arm1_ee_pm_1[16]{ 0 };
 		double arm1_ee_pm_2[16]{ 0 };
 		double arm1_ee_pm_3[16]{ 0 };
+		double arm1_ee_pm_4[16]{ 0 };
+		double arm1_ee_pm_5[16]{ 0 };
 
 		double arm1_comp_f[6]{ 0 };
 		double arm1_init_force[6]{ 0 };
@@ -1205,14 +1215,20 @@ namespace robot
 		double arm2_temp_force_1[6] = { 0 };
 		double arm2_temp_force_2[6] = { 0 };
 		double arm2_temp_force_3[6] = { 0 };
+		double arm2_temp_force_4[6] = { 0 };
+		double arm2_temp_force_5[6] = { 0 };
 
 		double arm2_force_data_1[6] = { 0 };
 		double arm2_force_data_2[6] = { 0 };
 		double arm2_force_data_3[6] = { 0 };
+		double arm2_force_data_4[6] = { 0 };
+		double arm2_force_data_5[6] = { 0 };
 
 		double arm2_ee_pm_1[16]{ 0 };
 		double arm2_ee_pm_2[16]{ 0 };
 		double arm2_ee_pm_3[16]{ 0 };
+		double arm2_ee_pm_4[16]{ 0 };
+		double arm2_ee_pm_5[16]{ 0 };
 
 		double arm2_comp_f[6]{ 0 };
 		double arm2_init_force[6]{ 0 };
@@ -1407,35 +1423,36 @@ namespace robot
 		}
 
 
-		if (imp_->stop_flag)
-		{
-			if (imp_->stop_count == 1)
+			if (imp_->stop_flag)
 			{
+				if (imp_->stop_count == 1)
+				{
+					caculateAvgForce(imp_->arm1_force_data_1, imp_->arm2_force_data_1, imp_->arm1_temp_force_1, imp_->arm2_temp_force_1, 1);
+				}
+				else if (imp_->stop_count == 2)
+				{
+					caculateAvgForce(imp_->arm1_force_data_2, imp_->arm2_force_data_2, imp_->arm1_temp_force_2, imp_->arm2_temp_force_2, 2);
+				}
+				else if (imp_->stop_count == 3)
+				{
+					caculateAvgForce(imp_->arm1_force_data_3, imp_->arm2_force_data_3, imp_->arm1_temp_force_3, imp_->arm2_temp_force_3, 3);
+				}
+				else if (imp_->stop_count == 4)
+				{
+					caculateAvgForce(imp_->arm1_force_data_4, imp_->arm2_force_data_4, imp_->arm1_temp_force_4, imp_->arm2_temp_force_4, 4);
+				}
+				else if (imp_->stop_count == 5)
+				{
+					caculateAvgForce(imp_->arm1_force_data_5, imp_->arm2_force_data_5, imp_->arm1_temp_force_5, imp_->arm2_temp_force_5, 5);
+				}
+				else
+				{
+					mout() << "Stop Count Wrong: " << imp_->stop_count << " stop flag: " << imp_->stop_flag << std::endl;
+					return 0;
+				}
 
-				caculateAvgForce(imp_->arm1_force_data_1, imp_->arm2_force_data_1, imp_->arm1_temp_force_1, imp_->arm2_temp_force_1, 1);
-
-
+				return 80000 - count();
 			}
-			else if (imp_->stop_count == 2)
-			{
-
-				caculateAvgForce(imp_->arm1_force_data_2, imp_->arm2_force_data_2, imp_->arm1_temp_force_2, imp_->arm2_temp_force_2, 2);
-
-			}
-			else if (imp_->stop_count == 3)
-			{
-
-				caculateAvgForce(imp_->arm1_force_data_3, imp_->arm2_force_data_3, imp_->arm1_temp_force_3, imp_->arm2_temp_force_3, 3);
-
-			}
-			else
-			{
-				mout() << "Stop Count Wrong: " << imp_->stop_count << " stop flag: " << imp_->stop_flag << std::endl;
-				return 0;
-			}
-
-			return 80000 - count();
-		}
 		else
 		{
 			static double init_angle[12] =
@@ -1453,6 +1470,14 @@ namespace robot
 			static double angle3[12] =
 			{ 0, 0, 5 * PI / 6, -2 * PI / 3, -2 * PI / 3, 0 ,
 			0, 0, -2 * PI / 3, PI / 12, 5 * PI / 12, 0 };
+
+			static double angle4[12] =
+			{ 0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 3, 0 ,
+			0, 0, -2 * PI / 3, PI / 3, PI / 3, 0 };
+
+			static double angle5[12] =
+			{ 0, 0, 5 * PI / 6, -7 * PI / 12, -5 * PI / 12, 0 ,
+			0, 0, -2 * PI / 3, PI / 6, 2 * PI / 3, 0 };
 
 
 			//// Arm 1 Angle
@@ -1579,6 +1604,58 @@ namespace robot
 			}
 			else if (imp_->target3_reached && !imp_->target4_reached)
 			{
+                dualArm.setInputPos(angle4);
+                if (dualArm.forwardKinematics())std::cout << "forward failed" << std::endl;
+
+				daJointMove(angle4);
+
+				if (motorsPositionCheck(current_angle, angle4, 12))
+				{
+					mout() << "Target 4 Reached" << std::endl;
+
+					eeA1.getMpm(imp_->arm1_ee_pm_4);
+					eeA2.getMpm(imp_->arm2_ee_pm_4);
+
+					imp_->target4_reached = true;
+					imp_->stop_count = 4;
+					imp_->current_stop_time = count();
+					imp_->stop_flag = true;
+                    //状态数据清零
+                    for(int i=0;i<6;i++)
+                    {
+                        imp_->arm1_temp_force_4[i]=0; imp_->arm2_temp_force_4[i]=0;
+                    }
+					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
+				}
+			}
+			else if (imp_->target4_reached && !imp_->target5_reached)
+			{
+                dualArm.setInputPos(angle5);
+                if (dualArm.forwardKinematics())std::cout << "forward failed" << std::endl;
+
+				daJointMove(angle5);
+
+				if (motorsPositionCheck(current_angle, angle5, 12))
+				{
+					mout() << "Target 5 Reached" << std::endl;
+
+					eeA1.getMpm(imp_->arm1_ee_pm_5);
+					eeA2.getMpm(imp_->arm2_ee_pm_5);
+
+					imp_->target5_reached = true;
+					imp_->stop_count = 5;
+					imp_->current_stop_time = count();
+					imp_->stop_flag = true;
+                    //状态数据清零
+                    for(int i=0;i<6;i++)
+                    {
+                        imp_->arm1_temp_force_5[i]=0; imp_->arm2_temp_force_5[i]=0;
+                    }
+					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
+				}
+			}
+			else if (imp_->target5_reached && !imp_->target6_reached)
+			{
 				// Back To Init
                 dualArm.setInputPos(init_angle);
                 if (dualArm.forwardKinematics())std::cout << "forward failed" << std::endl;
@@ -1588,81 +1665,113 @@ namespace robot
 				if (motorsPositionCheck(current_angle, init_angle, 12))
 				{
 					mout() << "Back To Init Pos" << std::endl;
-					imp_->target4_reached = true;
+					imp_->target6_reached = true;
 
 				}
 
 			}
-			else if (imp_->target1_reached && imp_->target2_reached && imp_->target3_reached && imp_->target4_reached)
+			else if (imp_->target1_reached && imp_->target2_reached && imp_->target3_reached && imp_->target4_reached && imp_->target5_reached && imp_->target6_reached)
 			{
-				// 姿态退化检测：三次姿态过于相近会导致最小二乘矩阵退化，求出的 P/L 不可靠
-				auto rm_max_abs_diff = [](const double a[9], const double b[9]) {
-					double m = 0;
-					for (int i = 0; i < 9; ++i) {
-						double d = std::fabs(a[i] - b[i]);
-						if (d > m) m = d;
-					}
-					return m;
+				// ========== Arm 1 标定（支持 5 个姿态） ==========
+				const int num_poses = 5;
+				double arm1_ee_rm[5][9]{ 0 };
+				double arm1_ee_rm_inv[5][9]{ 0 };
+				double* arm1_force_data[5] = {
+					imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3,
+					imp_->arm1_force_data_4, imp_->arm1_force_data_5
 				};
-				auto poses_excited = [&](const double rm1[9], const double rm2[9], const double rm3[9]) {
-					const double tol_rm = 1e-4;
-					return rm_max_abs_diff(rm1, rm2) > tol_rm
-						|| rm_max_abs_diff(rm1, rm3) > tol_rm
-						|| rm_max_abs_diff(rm2, rm3) > tol_rm;
+				double* arm1_ee_pm[5] = {
+					imp_->arm1_ee_pm_1, imp_->arm1_ee_pm_2, imp_->arm1_ee_pm_3,
+					imp_->arm1_ee_pm_4, imp_->arm1_ee_pm_5
 				};
 
-				// ========== Arm 1 标定 ==========
-				double arm1_t_vector[9]{ 0 };
-				double arm1_f_vector[9]{ 0 };
-				double arm1_r_matrix[54]{ 0 };
-
-				double arm1_ee_rm_1[9]{ 0 };
-				double arm1_ee_rm_2[9]{ 0 };
-				double arm1_ee_rm_3[9]{ 0 };
-				double arm1_ee_rm_1_inv[9]{ 0 };
-				double arm1_ee_rm_2_inv[9]{ 0 };
-				double arm1_ee_rm_3_inv[9]{ 0 };
-
-				double arm1_current_force[6]{ 0 };
-
-				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_1, arm1_ee_rm_1);
-				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_2, arm1_ee_rm_2);
-				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_3, arm1_ee_rm_3);
-
-				bool arm1_pose_ok = poses_excited(arm1_ee_rm_1, arm1_ee_rm_2, arm1_ee_rm_3);
-				if (!arm1_pose_ok)
+				// 提取旋转矩阵
+				for (int i = 0; i < num_poses; ++i)
 				{
-					mout() << "[WARN] ModelComP: Arm1 三次姿态几乎相同，跳过 Arm1 标定（保留已有 Arm1 P/L）" << std::endl;
+					aris::dynamic::s_pm2rm(arm1_ee_pm[i], arm1_ee_rm[i]);
+					gc.getInverseRm(arm1_ee_rm[i], arm1_ee_rm_inv[i]);
 				}
-				else
+
+				// 构建 R 矩阵（15行×6列）：R = [R1^T, I; R2^T, I; ...; R5^T, I]
+				const int rows = num_poses * 3;  // 15行
+				const int cols = 6;              // 6列
+				double arm1_r_matrix[rows * cols]{ 0 };
+				double arm1_f_vector[rows]{ 0 };
+
+				for (int p = 0; p < num_poses; ++p)
 				{
-					// 获取旋转矩阵的逆 (R^T)
-					gc.getInverseRm(arm1_ee_rm_1, arm1_ee_rm_1_inv);
-					gc.getInverseRm(arm1_ee_rm_2, arm1_ee_rm_2_inv);
-					gc.getInverseRm(arm1_ee_rm_3, arm1_ee_rm_3_inv);
-
-					// Step 1: 先求 L 向量 (力方程)
-					gc.getForceVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_f_vector);
-					gc.getRMatrix(arm1_ee_rm_1, arm1_ee_rm_2, arm1_ee_rm_3, arm1_r_matrix);
-					gc.getPLMatrix(arm1_r_matrix, arm1_f_vector, imp_->arm1_l_vector);
-
-					// Step 2: 用 L 向量计算每个姿态下的真实重力 G = R^{-1} × L[0:3]
-					double arm1_L_vec[3] = { imp_->arm1_l_vector[0], imp_->arm1_l_vector[1], imp_->arm1_l_vector[2] };
-					double arm1_G1[3]{ 0 }, arm1_G2[3]{ 0 }, arm1_G3[3]{ 0 };
-					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_1_inv, arm1_L_vec, arm1_G1);
-					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_2_inv, arm1_L_vec, arm1_G2);
-					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_3_inv, arm1_L_vec, arm1_G3);
-
-					// Step 3: 用真实重力（而非传感器读数）构造 F 矩阵，求 P 向量
-					double arm1_true_force_1[6] = { arm1_G1[0], arm1_G1[1], arm1_G1[2], 0, 0, 0 };
-					double arm1_true_force_2[6] = { arm1_G2[0], arm1_G2[1], arm1_G2[2], 0, 0, 0 };
-					double arm1_true_force_3[6] = { arm1_G3[0], arm1_G3[1], arm1_G3[2], 0, 0, 0 };
-
-					double arm1_f_matrix[54]{ 0 };
-					gc.getTorqueVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_t_vector);
-					gc.getFMatrix(arm1_true_force_1, arm1_true_force_2, arm1_true_force_3, arm1_f_matrix);
-					gc.getPLMatrix(arm1_f_matrix, arm1_t_vector, imp_->arm1_p_vector);
+					// 每3行对应一个姿态
+					int row_start = p * 3;
+					// R^T 的前3列（旋转部分）
+					arm1_r_matrix[(row_start + 0) * cols + 0] = arm1_ee_rm_inv[p][0];
+					arm1_r_matrix[(row_start + 0) * cols + 1] = arm1_ee_rm_inv[p][3];
+					arm1_r_matrix[(row_start + 0) * cols + 2] = arm1_ee_rm_inv[p][6];
+					arm1_r_matrix[(row_start + 1) * cols + 0] = arm1_ee_rm_inv[p][1];
+					arm1_r_matrix[(row_start + 1) * cols + 1] = arm1_ee_rm_inv[p][4];
+					arm1_r_matrix[(row_start + 1) * cols + 2] = arm1_ee_rm_inv[p][7];
+					arm1_r_matrix[(row_start + 2) * cols + 0] = arm1_ee_rm_inv[p][2];
+					arm1_r_matrix[(row_start + 2) * cols + 1] = arm1_ee_rm_inv[p][5];
+					arm1_r_matrix[(row_start + 2) * cols + 2] = arm1_ee_rm_inv[p][8];
+					// 单位矩阵部分（零偏项）
+					arm1_r_matrix[(row_start + 0) * cols + 3] = 1.0;
+					arm1_r_matrix[(row_start + 1) * cols + 4] = 1.0;
+					arm1_r_matrix[(row_start + 2) * cols + 5] = 1.0;
+					// 力向量
+					arm1_f_vector[row_start + 0] = arm1_force_data[p][0];
+					arm1_f_vector[row_start + 1] = arm1_force_data[p][1];
+					arm1_f_vector[row_start + 2] = arm1_force_data[p][2];
 				}
+
+				// Step 1: 求解 L 向量
+				double U[rows * cols]{ 0 };
+				double Inv_[rows * cols]{ 0 };
+				double tau[rows]{ 0 };
+				double tau2[rows]{ 0 };
+				aris::Size p[rows];
+				aris::Size rank;
+				aris::dynamic::s_householder_utp(rows, cols, arm1_r_matrix, U, tau, p, rank, 1e-6);
+				aris::dynamic::s_householder_up2pinv(rows, cols, rank, U, tau, p, Inv_, tau2, 1e-6);
+				aris::dynamic::s_mm(cols, 1, rows, Inv_, arm1_f_vector, imp_->arm1_l_vector);
+
+				// Step 2: 计算每个姿态下的真实重力 G = R^{-1} × L[0:3]
+				double arm1_L_vec[3] = { imp_->arm1_l_vector[0], imp_->arm1_l_vector[1], imp_->arm1_l_vector[2] };
+				double arm1_G[5][3]{ 0 };
+				for (int p = 0; p < num_poses; ++p)
+				{
+					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_inv[p], arm1_L_vec, arm1_G[p]);
+				}
+
+				// Step 3: 构建 F 矩阵（15行×6列），用真实重力
+				double arm1_f_matrix[rows * cols]{ 0 };
+				double arm1_t_vector[rows]{ 0 };
+
+				for (int p = 0; p < num_poses; ++p)
+				{
+					int row_start = p * 3;
+					// F 矩阵：叉乘矩阵 [0, Gz, -Gy, 1, 0, 0; -Gz, 0, Gx, 0, 1, 0; Gy, -Gx, 0, 0, 0, 1]
+					double Gx = arm1_G[p][0], Gy = arm1_G[p][1], Gz = arm1_G[p][2];
+					arm1_f_matrix[(row_start + 0) * cols + 0] = 0;
+					arm1_f_matrix[(row_start + 0) * cols + 1] = Gz;
+					arm1_f_matrix[(row_start + 0) * cols + 2] = -Gy;
+					arm1_f_matrix[(row_start + 0) * cols + 3] = 1.0;
+					arm1_f_matrix[(row_start + 1) * cols + 0] = -Gz;
+					arm1_f_matrix[(row_start + 1) * cols + 1] = 0;
+					arm1_f_matrix[(row_start + 1) * cols + 2] = Gx;
+					arm1_f_matrix[(row_start + 1) * cols + 4] = 1.0;
+					arm1_f_matrix[(row_start + 2) * cols + 0] = Gy;
+					arm1_f_matrix[(row_start + 2) * cols + 1] = -Gx;
+					arm1_f_matrix[(row_start + 2) * cols + 2] = 0;
+					arm1_f_matrix[(row_start + 2) * cols + 5] = 1.0;
+					// 力矩向量
+					arm1_t_vector[row_start + 0] = arm1_force_data[p][3];
+					arm1_t_vector[row_start + 1] = arm1_force_data[p][4];
+					arm1_t_vector[row_start + 2] = arm1_force_data[p][5];
+				}
+
+				// Step 4: 求解 P 向量
+				aris::dynamic::s_householder_utp(rows, cols, arm1_f_matrix, U, tau, p, rank, 1e-6);
+				aris::dynamic::s_householder_up2pinv(rows, cols, rank, U, tau, p, Inv_, tau2, 1e-6);
+				aris::dynamic::s_mm(cols, 1, rows, Inv_, arm1_t_vector, imp_->arm1_p_vector);
 
 				double arm1_current_ee_pm[16]{ 0 };
 				double arm1_compf[6]{ 0 };
@@ -1670,57 +1779,102 @@ namespace robot
 				gc.getCompFT(arm1_current_ee_pm, imp_->arm1_l_vector, imp_->arm1_p_vector, arm1_compf);
 				getForceData(arm1_current_force, 0, imp_->init);
 
-				// ========== Arm 2 标定 ==========
-				double arm2_t_vector[9]{ 0 };
-				double arm2_f_vector[9]{ 0 };
-				double arm2_r_matrix[54]{ 0 };
+				// ========== Arm 2 标定（支持 5 个姿态） ==========
+				double arm2_ee_rm[5][9]{ 0 };
+				double arm2_ee_rm_inv[5][9]{ 0 };
+				double* arm2_force_data[5] = {
+					imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3,
+					imp_->arm2_force_data_4, imp_->arm2_force_data_5
+				};
+				double* arm2_ee_pm[5] = {
+					imp_->arm2_ee_pm_1, imp_->arm2_ee_pm_2, imp_->arm2_ee_pm_3,
+					imp_->arm2_ee_pm_4, imp_->arm2_ee_pm_5
+				};
 
-				double arm2_ee_rm_1[9]{ 0 };
-				double arm2_ee_rm_2[9]{ 0 };
-				double arm2_ee_rm_3[9]{ 0 };
-				double arm2_ee_rm_1_inv[9]{ 0 };
-				double arm2_ee_rm_2_inv[9]{ 0 };
-				double arm2_ee_rm_3_inv[9]{ 0 };
-
-				double arm2_current_force[6]{ 0 };
-
-				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_1, arm2_ee_rm_1);
-				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_2, arm2_ee_rm_2);
-				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_3, arm2_ee_rm_3);
-
-				bool arm2_pose_ok = poses_excited(arm2_ee_rm_1, arm2_ee_rm_2, arm2_ee_rm_3);
-				if (!arm2_pose_ok)
+				// 提取旋转矩阵
+				for (int i = 0; i < num_poses; ++i)
 				{
-					mout() << "[WARN] ModelComP: Arm2 三次姿态几乎相同，跳过 Arm2 标定（保留已有 Arm2 P/L）" << std::endl;
+					aris::dynamic::s_pm2rm(arm2_ee_pm[i], arm2_ee_rm[i]);
+					gc.getInverseRm(arm2_ee_rm[i], arm2_ee_rm_inv[i]);
 				}
-				else
+
+				// 构建 R 矩阵（15行×6列）
+				double arm2_r_matrix[rows * cols]{ 0 };
+				double arm2_f_vector[rows]{ 0 };
+
+				for (int p = 0; p < num_poses; ++p)
 				{
-					gc.getInverseRm(arm2_ee_rm_1, arm2_ee_rm_1_inv);
-					gc.getInverseRm(arm2_ee_rm_2, arm2_ee_rm_2_inv);
-					gc.getInverseRm(arm2_ee_rm_3, arm2_ee_rm_3_inv);
-
-					// Step 1: 先求 L 向量
-					gc.getForceVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_f_vector);
-					gc.getRMatrix(arm2_ee_rm_1, arm2_ee_rm_2, arm2_ee_rm_3, arm2_r_matrix);
-					gc.getPLMatrix(arm2_r_matrix, arm2_f_vector, imp_->arm2_l_vector);
-
-					// Step 2: 计算真实重力
-					double arm2_L_vec[3] = { imp_->arm2_l_vector[0], imp_->arm2_l_vector[1], imp_->arm2_l_vector[2] };
-					double arm2_G1[3]{ 0 }, arm2_G2[3]{ 0 }, arm2_G3[3]{ 0 };
-					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_1_inv, arm2_L_vec, arm2_G1);
-					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_2_inv, arm2_L_vec, arm2_G2);
-					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_3_inv, arm2_L_vec, arm2_G3);
-
-					// Step 3: 用真实重力构造 F 矩阵，求 P 向量
-					double arm2_true_force_1[6] = { arm2_G1[0], arm2_G1[1], arm2_G1[2], 0, 0, 0 };
-					double arm2_true_force_2[6] = { arm2_G2[0], arm2_G2[1], arm2_G2[2], 0, 0, 0 };
-					double arm2_true_force_3[6] = { arm2_G3[0], arm2_G3[1], arm2_G3[2], 0, 0, 0 };
-
-					double arm2_f_matrix[54]{ 0 };
-					gc.getTorqueVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_t_vector);
-					gc.getFMatrix(arm2_true_force_1, arm2_true_force_2, arm2_true_force_3, arm2_f_matrix);
-					gc.getPLMatrix(arm2_f_matrix, arm2_t_vector, imp_->arm2_p_vector);
+					int row_start = p * 3;
+					// R^T 的前3列（旋转部分）
+					arm2_r_matrix[(row_start + 0) * cols + 0] = arm2_ee_rm_inv[p][0];
+					arm2_r_matrix[(row_start + 0) * cols + 1] = arm2_ee_rm_inv[p][3];
+					arm2_r_matrix[(row_start + 0) * cols + 2] = arm2_ee_rm_inv[p][6];
+					arm2_r_matrix[(row_start + 1) * cols + 0] = arm2_ee_rm_inv[p][1];
+					arm2_r_matrix[(row_start + 1) * cols + 1] = arm2_ee_rm_inv[p][4];
+					arm2_r_matrix[(row_start + 1) * cols + 2] = arm2_ee_rm_inv[p][7];
+					arm2_r_matrix[(row_start + 2) * cols + 0] = arm2_ee_rm_inv[p][2];
+					arm2_r_matrix[(row_start + 2) * cols + 1] = arm2_ee_rm_inv[p][5];
+					arm2_r_matrix[(row_start + 2) * cols + 2] = arm2_ee_rm_inv[p][8];
+					// 单位矩阵部分（零偏项）
+					arm2_r_matrix[(row_start + 0) * cols + 3] = 1.0;
+					arm2_r_matrix[(row_start + 1) * cols + 4] = 1.0;
+					arm2_r_matrix[(row_start + 2) * cols + 5] = 1.0;
+					// 力向量
+					arm2_f_vector[row_start + 0] = arm2_force_data[p][0];
+					arm2_f_vector[row_start + 1] = arm2_force_data[p][1];
+					arm2_f_vector[row_start + 2] = arm2_force_data[p][2];
 				}
+
+				// Step 1: 求解 L 向量
+				double U2[rows * cols]{ 0 };
+				double Inv2_[rows * cols]{ 0 };
+				double tau2_[rows]{ 0 };
+				double tau22[rows]{ 0 };
+				aris::Size p2[rows];
+				aris::Size rank2;
+				aris::dynamic::s_householder_utp(rows, cols, arm2_r_matrix, U2, tau2_, p2, rank2, 1e-6);
+				aris::dynamic::s_householder_up2pinv(rows, cols, rank2, U2, tau2_, p2, Inv2_, tau22, 1e-6);
+				aris::dynamic::s_mm(cols, 1, rows, Inv2_, arm2_f_vector, imp_->arm2_l_vector);
+
+				// Step 2: 计算每个姿态下的真实重力 G = R^{-1} × L[0:3]
+				double arm2_L_vec[3] = { imp_->arm2_l_vector[0], imp_->arm2_l_vector[1], imp_->arm2_l_vector[2] };
+				double arm2_G[5][3]{ 0 };
+				for (int p = 0; p < num_poses; ++p)
+				{
+					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_inv[p], arm2_L_vec, arm2_G[p]);
+				}
+
+				// Step 3: 构建 F 矩阵（15行×6列），用真实重力
+				double arm2_f_matrix[rows * cols]{ 0 };
+				double arm2_t_vector[rows]{ 0 };
+
+				for (int p = 0; p < num_poses; ++p)
+				{
+					int row_start = p * 3;
+					// F 矩阵：叉乘矩阵
+					double Gx = arm2_G[p][0], Gy = arm2_G[p][1], Gz = arm2_G[p][2];
+					arm2_f_matrix[(row_start + 0) * cols + 0] = 0;
+					arm2_f_matrix[(row_start + 0) * cols + 1] = Gz;
+					arm2_f_matrix[(row_start + 0) * cols + 2] = -Gy;
+					arm2_f_matrix[(row_start + 0) * cols + 3] = 1.0;
+					arm2_f_matrix[(row_start + 1) * cols + 0] = -Gz;
+					arm2_f_matrix[(row_start + 1) * cols + 1] = 0;
+					arm2_f_matrix[(row_start + 1) * cols + 2] = Gx;
+					arm2_f_matrix[(row_start + 1) * cols + 4] = 1.0;
+					arm2_f_matrix[(row_start + 2) * cols + 0] = Gy;
+					arm2_f_matrix[(row_start + 2) * cols + 1] = -Gx;
+					arm2_f_matrix[(row_start + 2) * cols + 2] = 0;
+					arm2_f_matrix[(row_start + 2) * cols + 5] = 1.0;
+					// 力矩向量
+					arm2_t_vector[row_start + 0] = arm2_force_data[p][3];
+					arm2_t_vector[row_start + 1] = arm2_force_data[p][4];
+					arm2_t_vector[row_start + 2] = arm2_force_data[p][5];
+				}
+
+				// Step 4: 求解 P 向量
+				aris::dynamic::s_householder_utp(rows, cols, arm2_f_matrix, U2, tau2_, p2, rank2, 1e-6);
+				aris::dynamic::s_householder_up2pinv(rows, cols, rank2, U2, tau2_, p2, Inv2_, tau22, 1e-6);
+				aris::dynamic::s_mm(cols, 1, rows, Inv2_, arm2_t_vector, imp_->arm2_p_vector);
 
 				double arm2_current_ee_pm[16]{ 0 };
                 double arm2_compf[6]{0};
