@@ -3370,12 +3370,12 @@ namespace robot
                     return 30000 - count();
                 }
 
-                // ----------------- 标定用的4个角度（与m_comp一致，只用Arm2部分） -----------------
+                // ----------------- 标定用的4个角度（与m_comp一致，只用Arm2部分：后6个） -----------------
                 static double test_angles[4][6] = {
-                    {0, 0, -2 * PI / 3, PI / 6, PI / 2, 0},       // init_angle (Arm2)
-                    {0, 0, -2 * PI / 3, PI / 4, PI / 2, 0},       // angle1 (Arm2)
-                    {0, 0, -2 * PI / 3, PI / 4, 7 * PI / 12, 0},  // angle2 (Arm2)
-                    {0, 0, -2 * PI / 3, PI / 12, 5 * PI / 12, 0}  // angle3 (Arm2)
+                    {0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 2, 0},           // init_angle (Arm2)
+                    {0, 0, 5 * PI / 6, -4 * PI / 6, -2 * PI / 6, -PI / 6}, // angle1 (Arm2)
+                    {0, 0, 5 * PI / 6, -3 * PI / 6, -PI / 6, -2 * PI / 6}, // angle2 (Arm2)
+                    {0, 0, 5 * PI / 6, -2 * PI / 6, -2 * PI / 3, -2 * PI / 6} // angle3 (Arm2)
                 };
                 
                 static int current_target = 0;
