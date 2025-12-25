@@ -555,13 +555,13 @@ namespace robot
         //Switch Model
         int m_;
 
-        double arm1_p_vector[9]{0};
-        double arm1_l_vector[9]{0};
-        double arm2_p_vector[9]{0};
-        double arm2_l_vector[9]{0};
+        double arm1_p_vector[6]{0};
+        double arm1_l_vector[6]{0};
+        double arm2_p_vector[6]{0};
+        double arm2_l_vector[6]{0};
 
-        double arm1_init_force[9]{0};
-        double arm2_init_force[9]{0};
+        double arm1_init_force[6]{0};
+        double arm2_init_force[6]{0};
 
         bool init = false;
 
@@ -618,47 +618,8 @@ namespace robot
 
             }
 
-            if (!init_)
-            {
-                if(m_ == 0)
-                {
-                     mout() << "Compensate Init Force A1" << std::endl;
-                     mout()<<"Init 1 : "<<imp_->arm1_init_force[0]<<'\t'<<imp_->arm1_init_force[1]<<'\t'<<imp_->arm1_init_force[2]<<'\t'
-                             <<imp_->arm1_init_force[3]<<'\t'<<imp_->arm1_init_force[4]<<'\t'<<imp_->arm1_init_force[5]<<std::endl;
-                }
-                else if (m_ == 1)
-                {
-                    mout() << "Compensate Init Force A2" << std::endl;
-                    mout()<<"Init 2 : "<<imp_->arm2_init_force[0]<<'\t'<<imp_->arm2_init_force[1]<<'\t'<<imp_->arm2_init_force[2]<<'\t'
-                            <<imp_->arm2_init_force[3]<<'\t'<<imp_->arm2_init_force[4]<<'\t'<<imp_->arm2_init_force[5]<<std::endl;
-                }
-
-
-
-
-            }
-            else
-            {
-                if (m_ == 0)
-                {
-                    for (std::size_t i = 0; i < 6; ++i)
-                    {
-
-                        data_[i] = (static_cast<double>(raw_force[i]) / 1000.0) - imp_->arm1_init_force[i];
-
-                    }
-                }
-                else if (m_ == 1)
-                {
-                    for (std::size_t i = 0; i < 6; ++i)
-                    {
-
-                        data_[i] = (static_cast<double>(raw_force[i]) / 1000.0) - imp_->arm2_init_force[i];
-
-                    }
-                }
-
-            }
+            // m_get 用于验证 gravcomp：这里返回原始传感器数据（不做 init_force 减法）
+            static_cast<void>(init_);
         };
 
 		auto forceFilter = [&](double* actual_force_, double* filtered_force_)
@@ -1255,7 +1216,10 @@ namespace robot
 		for (auto& m : motorOptions()) m =
 			aris::plan::Plan::NOT_CHECK_POS_CONTINUOUS_SECOND_ORDER;
 
-       std::cout<<"init"<<std::endl;
+		// 读取上一次标定结果，作为“姿态退化/标定失败”时的兜底（避免把文件写坏）
+		GravComp gc;
+		gc.loadPLVector(imp_->arm1_p_vector, imp_->arm1_l_vector, imp_->arm2_p_vector, imp_->arm2_l_vector);
+		mout() << "ModelComP: load existing P & L Vector (fallback)" << std::endl;
 
 
 
@@ -1623,6 +1587,22 @@ namespace robot
 			}
 			else if (imp_->target1_reached && imp_->target2_reached && imp_->target3_reached && imp_->target4_reached)
 			{
+				// 姿态退化检测：三次姿态过于相近会导致最小二乘矩阵退化，求出的 P/L 不可靠
+				auto rm_max_abs_diff = [](const double a[9], const double b[9]) {
+					double m = 0;
+					for (int i = 0; i < 9; ++i) {
+						double d = std::fabs(a[i] - b[i]);
+						if (d > m) m = d;
+					}
+					return m;
+				};
+				auto poses_excited = [&](const double rm1[9], const double rm2[9], const double rm3[9]) {
+					const double tol_rm = 1e-4;
+					return rm_max_abs_diff(rm1, rm2) > tol_rm
+						|| rm_max_abs_diff(rm1, rm3) > tol_rm
+						|| rm_max_abs_diff(rm2, rm3) > tol_rm;
+				};
+
 				// ========== Arm 1 标定 ==========
 				double arm1_t_vector[9]{ 0 };
 				double arm1_f_vector[9]{ 0 };
@@ -1641,32 +1621,40 @@ namespace robot
 				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_2, arm1_ee_rm_2);
 				aris::dynamic::s_pm2rm(imp_->arm1_ee_pm_3, arm1_ee_rm_3);
 
-				// 获取旋转矩阵的逆 (R^T)
-				gc.getInverseRm(arm1_ee_rm_1, arm1_ee_rm_1_inv);
-				gc.getInverseRm(arm1_ee_rm_2, arm1_ee_rm_2_inv);
-				gc.getInverseRm(arm1_ee_rm_3, arm1_ee_rm_3_inv);
+				bool arm1_pose_ok = poses_excited(arm1_ee_rm_1, arm1_ee_rm_2, arm1_ee_rm_3);
+				if (!arm1_pose_ok)
+				{
+					mout() << "[WARN] ModelComP: Arm1 三次姿态几乎相同，跳过 Arm1 标定（保留已有 Arm1 P/L）" << std::endl;
+				}
+				else
+				{
+					// 获取旋转矩阵的逆 (R^T)
+					gc.getInverseRm(arm1_ee_rm_1, arm1_ee_rm_1_inv);
+					gc.getInverseRm(arm1_ee_rm_2, arm1_ee_rm_2_inv);
+					gc.getInverseRm(arm1_ee_rm_3, arm1_ee_rm_3_inv);
 
-				// Step 1: 先求 L 向量 (力方程)
-				gc.getForceVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_f_vector);
-				gc.getRMatrix(arm1_ee_rm_1, arm1_ee_rm_2, arm1_ee_rm_3, arm1_r_matrix);
-				gc.getPLMatrix(arm1_r_matrix, arm1_f_vector, imp_->arm1_l_vector);
+					// Step 1: 先求 L 向量 (力方程)
+					gc.getForceVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_f_vector);
+					gc.getRMatrix(arm1_ee_rm_1, arm1_ee_rm_2, arm1_ee_rm_3, arm1_r_matrix);
+					gc.getPLMatrix(arm1_r_matrix, arm1_f_vector, imp_->arm1_l_vector);
 
-				// Step 2: 用 L 向量计算每个姿态下的真实重力 G = R^{-1} × L[0:3]
-				double arm1_L_vec[3] = { imp_->arm1_l_vector[0], imp_->arm1_l_vector[1], imp_->arm1_l_vector[2] };
-				double arm1_G1[3]{ 0 }, arm1_G2[3]{ 0 }, arm1_G3[3]{ 0 };
-				aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_1_inv, arm1_L_vec, arm1_G1);
-				aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_2_inv, arm1_L_vec, arm1_G2);
-				aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_3_inv, arm1_L_vec, arm1_G3);
+					// Step 2: 用 L 向量计算每个姿态下的真实重力 G = R^{-1} × L[0:3]
+					double arm1_L_vec[3] = { imp_->arm1_l_vector[0], imp_->arm1_l_vector[1], imp_->arm1_l_vector[2] };
+					double arm1_G1[3]{ 0 }, arm1_G2[3]{ 0 }, arm1_G3[3]{ 0 };
+					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_1_inv, arm1_L_vec, arm1_G1);
+					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_2_inv, arm1_L_vec, arm1_G2);
+					aris::dynamic::s_mm(3, 1, 3, arm1_ee_rm_3_inv, arm1_L_vec, arm1_G3);
 
-				// Step 3: 用真实重力（而非传感器读数）构造 F 矩阵，求 P 向量
-				double arm1_true_force_1[6] = { arm1_G1[0], arm1_G1[1], arm1_G1[2], 0, 0, 0 };
-				double arm1_true_force_2[6] = { arm1_G2[0], arm1_G2[1], arm1_G2[2], 0, 0, 0 };
-				double arm1_true_force_3[6] = { arm1_G3[0], arm1_G3[1], arm1_G3[2], 0, 0, 0 };
+					// Step 3: 用真实重力（而非传感器读数）构造 F 矩阵，求 P 向量
+					double arm1_true_force_1[6] = { arm1_G1[0], arm1_G1[1], arm1_G1[2], 0, 0, 0 };
+					double arm1_true_force_2[6] = { arm1_G2[0], arm1_G2[1], arm1_G2[2], 0, 0, 0 };
+					double arm1_true_force_3[6] = { arm1_G3[0], arm1_G3[1], arm1_G3[2], 0, 0, 0 };
 
-				double arm1_f_matrix[54]{ 0 };
-				gc.getTorqueVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_t_vector);
-				gc.getFMatrix(arm1_true_force_1, arm1_true_force_2, arm1_true_force_3, arm1_f_matrix);
-				gc.getPLMatrix(arm1_f_matrix, arm1_t_vector, imp_->arm1_p_vector);
+					double arm1_f_matrix[54]{ 0 };
+					gc.getTorqueVector(imp_->arm1_force_data_1, imp_->arm1_force_data_2, imp_->arm1_force_data_3, arm1_t_vector);
+					gc.getFMatrix(arm1_true_force_1, arm1_true_force_2, arm1_true_force_3, arm1_f_matrix);
+					gc.getPLMatrix(arm1_f_matrix, arm1_t_vector, imp_->arm1_p_vector);
+				}
 
 				double arm1_current_ee_pm[16]{ 0 };
 				double arm1_compf[6]{ 0 };
@@ -1692,31 +1680,39 @@ namespace robot
 				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_2, arm2_ee_rm_2);
 				aris::dynamic::s_pm2rm(imp_->arm2_ee_pm_3, arm2_ee_rm_3);
 
-				gc.getInverseRm(arm2_ee_rm_1, arm2_ee_rm_1_inv);
-				gc.getInverseRm(arm2_ee_rm_2, arm2_ee_rm_2_inv);
-				gc.getInverseRm(arm2_ee_rm_3, arm2_ee_rm_3_inv);
+				bool arm2_pose_ok = poses_excited(arm2_ee_rm_1, arm2_ee_rm_2, arm2_ee_rm_3);
+				if (!arm2_pose_ok)
+				{
+					mout() << "[WARN] ModelComP: Arm2 三次姿态几乎相同，跳过 Arm2 标定（保留已有 Arm2 P/L）" << std::endl;
+				}
+				else
+				{
+					gc.getInverseRm(arm2_ee_rm_1, arm2_ee_rm_1_inv);
+					gc.getInverseRm(arm2_ee_rm_2, arm2_ee_rm_2_inv);
+					gc.getInverseRm(arm2_ee_rm_3, arm2_ee_rm_3_inv);
 
-				// Step 1: 先求 L 向量
-				gc.getForceVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_f_vector);
-				gc.getRMatrix(arm2_ee_rm_1, arm2_ee_rm_2, arm2_ee_rm_3, arm2_r_matrix);
-				gc.getPLMatrix(arm2_r_matrix, arm2_f_vector, imp_->arm2_l_vector);
+					// Step 1: 先求 L 向量
+					gc.getForceVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_f_vector);
+					gc.getRMatrix(arm2_ee_rm_1, arm2_ee_rm_2, arm2_ee_rm_3, arm2_r_matrix);
+					gc.getPLMatrix(arm2_r_matrix, arm2_f_vector, imp_->arm2_l_vector);
 
-				// Step 2: 计算真实重力
-				double arm2_L_vec[3] = { imp_->arm2_l_vector[0], imp_->arm2_l_vector[1], imp_->arm2_l_vector[2] };
-				double arm2_G1[3]{ 0 }, arm2_G2[3]{ 0 }, arm2_G3[3]{ 0 };
-				aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_1_inv, arm2_L_vec, arm2_G1);
-				aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_2_inv, arm2_L_vec, arm2_G2);
-				aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_3_inv, arm2_L_vec, arm2_G3);
+					// Step 2: 计算真实重力
+					double arm2_L_vec[3] = { imp_->arm2_l_vector[0], imp_->arm2_l_vector[1], imp_->arm2_l_vector[2] };
+					double arm2_G1[3]{ 0 }, arm2_G2[3]{ 0 }, arm2_G3[3]{ 0 };
+					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_1_inv, arm2_L_vec, arm2_G1);
+					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_2_inv, arm2_L_vec, arm2_G2);
+					aris::dynamic::s_mm(3, 1, 3, arm2_ee_rm_3_inv, arm2_L_vec, arm2_G3);
 
-				// Step 3: 用真实重力构造 F 矩阵，求 P 向量
-				double arm2_true_force_1[6] = { arm2_G1[0], arm2_G1[1], arm2_G1[2], 0, 0, 0 };
-				double arm2_true_force_2[6] = { arm2_G2[0], arm2_G2[1], arm2_G2[2], 0, 0, 0 };
-				double arm2_true_force_3[6] = { arm2_G3[0], arm2_G3[1], arm2_G3[2], 0, 0, 0 };
+					// Step 3: 用真实重力构造 F 矩阵，求 P 向量
+					double arm2_true_force_1[6] = { arm2_G1[0], arm2_G1[1], arm2_G1[2], 0, 0, 0 };
+					double arm2_true_force_2[6] = { arm2_G2[0], arm2_G2[1], arm2_G2[2], 0, 0, 0 };
+					double arm2_true_force_3[6] = { arm2_G3[0], arm2_G3[1], arm2_G3[2], 0, 0, 0 };
 
-				double arm2_f_matrix[54]{ 0 };
-				gc.getTorqueVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_t_vector);
-				gc.getFMatrix(arm2_true_force_1, arm2_true_force_2, arm2_true_force_3, arm2_f_matrix);
-				gc.getPLMatrix(arm2_f_matrix, arm2_t_vector, imp_->arm2_p_vector);
+					double arm2_f_matrix[54]{ 0 };
+					gc.getTorqueVector(imp_->arm2_force_data_1, imp_->arm2_force_data_2, imp_->arm2_force_data_3, arm2_t_vector);
+					gc.getFMatrix(arm2_true_force_1, arm2_true_force_2, arm2_true_force_3, arm2_f_matrix);
+					gc.getPLMatrix(arm2_f_matrix, arm2_t_vector, imp_->arm2_p_vector);
+				}
 
 				double arm2_current_ee_pm[16]{ 0 };
                 double arm2_compf[6]{0};
@@ -2569,7 +2565,9 @@ namespace robot
 				gc.getCompFT(current_pm, imp_->arm1_l_vector, imp_->arm1_p_vector, comp_force);
 				for (int i = 0; i < 6; i++)
 				{
-					actual_force[i] = comp_force[i] + current_force[i];
+					// getForceData 在 init==true 时返回 (raw - init_force)，这里恢复成 raw 再做重力补偿
+					double raw_i = current_force[i] + imp_->arm1_init_force[i];
+					actual_force[i] = comp_force[i] + raw_i;
 				}
 
 				//Dead Zone of Force
@@ -3213,6 +3211,12 @@ namespace robot
             getForceData(raw_force_checker + 6, 1, imp_->init);
             gc.getCompFT(a2_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force_checker + 6);
 
+            // getForceData 在 init==true 时返回 (raw - init_force)，这里恢复成 raw
+            for (int i = 0; i < 6; ++i)
+            {
+                raw_force_checker[i]     += imp_->arm1_init_force[i];
+                raw_force_checker[i + 6] += imp_->arm2_init_force[i];
+            }
 
                     for (int i = 0; i < 12; i++) 
                     {
@@ -3434,7 +3438,9 @@ namespace robot
 
                 for (int i = 0; i < 6; ++i)
                 {
-                    actual_force[i] = comp_force[i] + current_force[i];
+                    // getForceData 在 init==true 时返回 (raw - init_force)，这里恢复成 raw 再做重力补偿
+                    double raw_i = current_force[i] + imp_->arm2_init_force[i];
+                    actual_force[i] = comp_force[i] + raw_i;
                 }
 
                 // ----------------- 3. 关节运动控制 -----------------

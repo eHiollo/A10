@@ -156,23 +156,12 @@ auto GravComp::getCompFT(double current_pose_[16], double L_[6], double P_[6], d
     };
 
     double r_cross_G[3]{0};
-    double r_cross_F0[3]{0};
     cross(Mass_center, G_vector, r_cross_G);
-    cross(Mass_center, F_vector, r_cross_F0);
 
-    // Keep your original sign convention:
-    // M0 = K - (r × F0)
-    // Mg = (r × G)
-    double M0[3]{
-        K_vector[0] - r_cross_F0[0],
-        K_vector[1] - r_cross_F0[1],
-        K_vector[2] - r_cross_F0[2]
-    };
-    double Mg[3]{ r_cross_G[0], r_cross_G[1], r_cross_G[2] };
-
-    // comp_f(torque) = -(M0 + Mg)
+    // 标准模型：tau_sensor = K + (r × G)
+    // 因此补偿：comp_tau = -(K + r×G)
     for (int i = 0; i < 3; ++i) {
-        comp_f_[i + 3] = -M0[i] - Mg[i];
+        comp_f_[i + 3] = -K_vector[i] - r_cross_G[i];
     }
 }
 
