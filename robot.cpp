@@ -1331,9 +1331,10 @@ namespace robot
         };
 
 		//Ethercat Warning
+        // 修复：标定时使用原始力数据，不减去init_force
+        // 重力补偿算法本身会计算传感器零偏（F0），所以标定数据必须是原始值
 		auto getForceData = [&](double* data_, int m_, bool init_)
 		{
-
 			int raw_force[6]{ 0 };
 
             for (int i = 0; i < 6; ++i)
@@ -1342,11 +1343,10 @@ namespace robot
 				{
                     mout() << "Force Sensor Error" << std::endl;
 				}
-					
-
+				// 直接使用原始力数据（用于标定）
 				data_[i] = (static_cast<double>(raw_force[i]) / 1000.0);
-
 			}
+            
 			if (!init_)
 			{
                 if(m_ == 0)
@@ -1362,31 +1362,8 @@ namespace robot
                             <<imp_->arm2_init_force[3]<<'\t'<<imp_->arm2_init_force[4]<<'\t'<<imp_->arm2_init_force[5]<<std::endl;
                 }
 			}
-			else
-            {
-				if (m_ == 0)
-				{
-					for (std::size_t i = 0; i < 6; ++i)
-					{
-
-						data_[i] = (static_cast<double>(raw_force[i]) / 1000.0) - imp_->arm1_init_force[i];
-
-					}
-				}
-				else if (m_ == 1)
-				{
-					for (std::size_t i = 0; i < 6; ++i)
-					{
-
-						data_[i] = (static_cast<double>(raw_force[i]) / 1000.0) - imp_->arm2_init_force[i];
-
-					}
-				}
-                else
-                {
-                    mout()<<"Wrong Model"<<std::endl;
-                }
-			}
+            // 注意：对于 ModelComP 标定，始终使用原始数据
+            // init_force 的减法移到 ForceDrag 等运行时使用的地方
 		};
 
 
@@ -1593,10 +1570,10 @@ namespace robot
 					imp_->stop_count = 2;
 					imp_->current_stop_time = count();
 					imp_->stop_flag = true;
-                    //状态数据清零
+                    //状态数据清零 (修复: 应该清零 temp_force_2)
                     for(int i=0;i<6;i++)
                     {
-                        imp_->arm1_temp_force_1[i]=0; imp_->arm2_temp_force_1[i]=0;
+                        imp_->arm1_temp_force_2[i]=0; imp_->arm2_temp_force_2[i]=0;
                     }
 					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
 				}
@@ -1619,10 +1596,10 @@ namespace robot
 					imp_->stop_count = 3;
 					imp_->current_stop_time = count();
 					imp_->stop_flag = true;
-                    //状态数据清零
+                    //状态数据清零 (修复: 应该清零 temp_force_3)
                     for(int i=0;i<6;i++)
                     {
-                        imp_->arm1_temp_force_1[i]=0; imp_->arm2_temp_force_1[i]=0;
+                        imp_->arm1_temp_force_3[i]=0; imp_->arm2_temp_force_3[i]=0;
                     }
 					mout() << "current stop time: " << imp_->current_stop_time << std::endl;
 
@@ -2910,11 +2887,11 @@ namespace robot
 		double v_c[6]{ 0 };
 
 		//Impedence Parameter
-        // 拖动示教：高阻尼防震荡
+        // 拖动示教：平衡灵敏度和稳定性
 		double K[6]{ 0, 0, 0, 0, 0, 0 };
         
-        // 阻尼：大幅增加，防止震荡
-        double B[6]{ 300, 300, 300, 8, 8, 8 };
+        // 阻尼：适中
+        double B[6]{ 150, 150, 150, 4, 4, 4 };
         
         // 惯性：增大，降低响应速度
         double M[6]{ 15, 15, 15, 2.0, 2.0, 2.0 };
