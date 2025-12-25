@@ -3396,7 +3396,7 @@ namespace robot
 				}
 
 			}
-            // ======= ForceDrag: m == 1 branch (测试模式：按标定姿态运动+打印力数据) =======
+            // ======= ForceDrag: m == 1 branch (Arm2 导纳力控拖动) =======
             else if (imp_->m_ == 1)
             {
                 // ----------------- 0. 安全：关键指针 / NaN 检查 -----------------
@@ -3406,105 +3406,66 @@ namespace robot
                     return 30000 - count();
                 }
 
-                // ----------------- 标定用的4个角度（与m_comp一致，只用Arm2部分：后6个） -----------------
-                static double test_angles[4][6] = {
-                    {0, 0, 5 * PI / 6, -5 * PI / 6, -PI / 2, 0},           // init_angle (Arm2)
-                    {0, 0, 5 * PI / 6, -4 * PI / 6, -2 * PI / 6, -PI / 6}, // angle1 (Arm2)
-                    {0, 0, 5 * PI / 6, -3 * PI / 6, -PI / 6, -2 * PI / 6}, // angle2 (Arm2)
-                    {0, 0, 5 * PI / 6, -2 * PI / 6, -2 * PI / 3, -2 * PI / 6} // angle3 (Arm2)
-                };
-                
-                static int current_target = 0;
-                static int hold_count = 0;
-                const int hold_time = 2000;  // 每个位置停留2秒(2000个周期)
-                
                 // ----------------- 1. 读取当前末端状态 -----------------
                 double current_vel[6]{0};
-                eeA2.getP(current_pos);
-                eeA2.getV(current_vel);
-                eeA2.getMpm(current_pm);
+                eeA2.getP(current_pos);          // pe: [x,y,z,rx,ry,rz] in base frame
+                eeA2.getV(current_vel);          // ee cartesian velocity
+                eeA2.getMpm(current_pm);         // base_T_ee 4x4 pm
                 
-                // 读取当前关节角度
-                double current_joint[6]{0};
-                for (int i = 0; i < 6; ++i) {
-                    current_joint[i] = controller()->motorPool()[i + 6].actualPos();
+                // 首次进入时，初始化期望位置为当前位置
+                static bool first_run = true;
+                if (first_run)
+                {
+                    std::copy(current_pos, current_pos + 6, imp_->arm2_x_d);
+                    first_run = false;
+                    mout() << "[INFO] Initialize arm2_x_d to current position" << std::endl;
                 }
 
-                // 从 current_pm 里取出 R_be
+                // 从 current_pm 里取出 R_be (base <- ee 的旋转矩阵, 用于 ee->base: F_b = R_be * F_e)
                 double rm_be[9];
                 rm_be[0] = current_pm[0];   rm_be[1] = current_pm[1];   rm_be[2] = current_pm[2];
                 rm_be[3] = current_pm[4];   rm_be[4] = current_pm[5];   rm_be[5] = current_pm[6];
                 rm_be[6] = current_pm[8];   rm_be[7] = current_pm[9];   rm_be[8] = current_pm[10];
 
                 // ----------------- 2. 力传感器 + 重力补偿（EE系） -----------------
-                double current_force[6]{0};
-                double comp_force[6]{0};
-                double actual_force[6]{0};
+                double current_force[6]{0};    // sensor/ee frame, init removed inside getForceData
+                double comp_force[6]{0};       // grav-comp in ee frame (from PL)
+                double actual_force[6]{0};     // contact = comp + sensor
+                double filtered_force[6]{0};   // filtered contact force (ee frame)
 
                 getForceData(current_force, 1, imp_->init);
                 gc.getCompFT(current_pm, imp_->arm2_l_vector, imp_->arm2_p_vector, comp_force);
 
+
                 for (int i = 0; i < 6; ++i)
                 {
-                    // getForceData 在 init==true 时返回 (raw - init_force)，这里恢复成 raw 再做重力补偿
-                    double raw_i = current_force[i] + imp_->arm2_init_force[i];
-                    actual_force[i] = comp_force[i] + raw_i;
+                    actual_force[i] = comp_force[i] + current_force[i];
+                    if (!std::isfinite(actual_force[i]))
+                    {
+                        mout() << "[BAD] actual_force NaN/Inf i=" << i
+                            << " cur=" << current_force[i]
+                            << " comp=" << comp_force[i] << std::endl;
+                        return 0;
+                    }
                 }
 
-                // ----------------- 3. 关节运动控制 -----------------
-                double* target_joint = test_angles[current_target];
-                double move = 0.00008;  // 与m_comp一致
-                bool reached = true;
-                
-                for (int i = 0; i < 6; ++i)
+                if (count() % 50 == 0)
                 {
-                    double cur = controller()->motorPool()[i + 6].targetPos();
-                    if (cur <= target_joint[i] - move)
-                    {
-                        controller()->motorPool()[i + 6].setTargetPos(cur + move);
-                        reached = false;
-                    }
-                    else if (cur >= target_joint[i] + move)
-                    {
-                        controller()->motorPool()[i + 6].setTargetPos(cur - move);
-                        reached = false;
-                    }
+                    lout() << "raw\t"
+                        << current_force[0] + imp_->arm2_init_force[0] << '\t'
+                        << current_force[1] + imp_->arm2_init_force[1] << '\t'
+                        << current_force[2] + imp_->arm2_init_force[2] << '\t'
+                        << current_force[3] + imp_->arm2_init_force[3] << '\t'
+                        << current_force[4] + imp_->arm2_init_force[4] << '\t'
+                        << current_force[5] + imp_->arm2_init_force[5] << '\t'
+                        << "comp+raw\t"
+                        << actual_force[0] << '\t'
+                        << actual_force[1] << '\t'
+                        << actual_force[2] << '\t'
+                        << actual_force[3] << '\t'
+                        << actual_force[4] << '\t'
+                        << actual_force[5] << std::endl;
                 }
-                
-                // ----------------- 4. 到达目标后停留并打印 -----------------
-                if (reached)
-                {
-                    hold_count++;
-                    
-                    // 每100ms打印一次力数据
-                    if (hold_count % 100 == 0)
-                    {
-                        mout() << "======== Target " << current_target << " [hold=" << hold_count << "ms] ========" << std::endl;
-                        mout() << "Joint: " << current_joint[0] << ", " << current_joint[1] << ", " 
-                               << current_joint[2] << ", " << current_joint[3] << ", " 
-                               << current_joint[4] << ", " << current_joint[5] << std::endl;
-                        mout() << "Sensor(raw):    " 
-                               << current_force[0] << ", " << current_force[1] << ", " << current_force[2] << " | "
-                               << current_force[3] << ", " << current_force[4] << ", " << current_force[5] << std::endl;
-                        mout() << "Comp(gravity):  " 
-                               << comp_force[0] << ", " << comp_force[1] << ", " << comp_force[2] << " | "
-                               << comp_force[3] << ", " << comp_force[4] << ", " << comp_force[5] << std::endl;
-                        mout() << "Actual(contact):" 
-                               << actual_force[0] << ", " << actual_force[1] << ", " << actual_force[2] << " | "
-                               << actual_force[3] << ", " << actual_force[4] << ", " << actual_force[5] << std::endl;
-                        mout() << ">>> Actual should be ~0 if compensation is correct <<<" << std::endl;
-                    }
-                    
-                    // 停留足够时间后，切换到下一个目标
-                    if (hold_count >= hold_time)
-                    {
-                        hold_count = 0;
-                        current_target = (current_target + 1) % 4;
-                        mout() << "====> Moving to Target " << current_target << std::endl;
-                    }
-                }
-                
-                return 30000 - count();
 
                 // 滤波（在 EE/传感器系）
                 forceFilter(actual_force, filtered_force);
@@ -3760,11 +3721,14 @@ namespace robot
                 //     }
 
                 // }
-            }
-        }
 
-                // ✅ 分支结束：返回剩余周期
-                return 30000 - count();
+            }
+
+
+
+		}
+
+        return 30000 - count();
 	}
 	ForceDrag::ForceDrag(const std::string& name)
 	{
