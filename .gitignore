@@ -385,3 +385,6 @@ hd_data_collect/
 build_clean/
 
 *.txt
+
+forece_drag_simulator_6d.py
+force_drag_simulator.py
